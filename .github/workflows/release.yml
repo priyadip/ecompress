@@ -1,17 +1,17 @@
 name: Release
 
-# Publishing uses PyPI Trusted Publishing (OIDC): GitHub proves this repo's
-# identity to PyPI directly, so no API token is ever stored or pasted anywhere.
+# Publishing authenticates with API tokens held as repository secrets:
 #
-# If a PYPI_API_TOKEN / TEST_PYPI_API_TOKEN repository secret exists it is used
-# instead; when the secret is absent the value is empty and the action falls
-# back to Trusted Publishing.
+#   TEST_PYPI_API_TOKEN   from https://test.pypi.org/manage/account/token/
+#   PYPI_API_TOKEN        from https://pypi.org/manage/account/token/
 #
-# Trusted publisher settings this workflow expects on PyPI and TestPyPI:
-#   Owner:          priyadip
-#   Repository:     compress-cli
-#   Workflow name:  release.yml
-#   Environment:    (leave blank)
+# Add them under Settings -> Secrets and variables -> Actions. The tokens are
+# never printed and never leave GitHub's secret store.
+#
+# If a secret is absent the value is empty and the publish action would fall
+# back to Trusted Publishing (OIDC), which fails with a confusing error unless
+# a publisher is registered on PyPI - so each job checks for its token first
+# and stops with a clear message instead.
 
 on:
   push:
@@ -95,6 +95,17 @@ jobs:
           name: dist
           path: dist/
 
+      - name: Check the TestPyPI token is configured
+        env:
+          TOKEN: ${{ secrets.TEST_PYPI_API_TOKEN }}
+        run: |
+          if [ -z "$TOKEN" ]; then
+            echo "::error::TEST_PYPI_API_TOKEN is not set. Create a token at" \
+                 "https://test.pypi.org/manage/account/token/ and add it at" \
+                 "https://github.com/${{ github.repository }}/settings/secrets/actions"
+            exit 1
+          fi
+
       - uses: pypa/gh-action-pypi-publish@release/v1
         with:
           repository-url: https://test.pypi.org/legacy/
@@ -120,6 +131,17 @@ jobs:
         with:
           name: dist
           path: dist/
+
+      - name: Check the PyPI token is configured
+        env:
+          TOKEN: ${{ secrets.PYPI_API_TOKEN }}
+        run: |
+          if [ -z "$TOKEN" ]; then
+            echo "::error::PYPI_API_TOKEN is not set. Create a token at" \
+                 "https://pypi.org/manage/account/token/ and add it at" \
+                 "https://github.com/${{ github.repository }}/settings/secrets/actions"
+            exit 1
+          fi
 
       - uses: pypa/gh-action-pypi-publish@release/v1
         with:
