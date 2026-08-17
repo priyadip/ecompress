@@ -5,6 +5,39 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.0] - 2026-08-18
+
+### Fixed
+
+- **A size floor is now reachable even at source resolution.** 2.0.1 taught the
+  search to climb when the encoder could not spend its budget, and 2.1.0 made
+  the opening guess accurate — but both worked through `-b:v`, an *average
+  bitrate* target. libx264 will not pad a stream with bits the content does not
+  call for, so on very compressible video it undershoots whatever number it is
+  given. Once the climb reached the source resolution there was nowhere left to
+  go and the result still fell short of the floor.
+
+  The search now switches to `-crf`, which fixes a *quality level* rather than
+  an average rate, so lowering it always produces more bits. On static but
+  detailed 4K the difference is decisive:
+
+  ```text
+  ABR 400 kbps  ->  280 kbps   (saturated, will not spend more)
+  CRF 24        ->  564 kbps
+  CRF 16        ->  786 kbps   (2.8x)
+  ```
+
+  A 4K clip that previously stopped at 752 KB against a 1.01 MB floor now lands
+  at 1.18 MB, still at full 3840x2160.
+
+### Changed
+
+- When the encoder is known to be saturated, the climb jumps straight to the
+  source resolution instead of stepping one rung at a time. The intermediate
+  rungs cannot help — for content that cannot absorb bits, the source is both
+  the largest file and the best quality — and skipping them saves several
+  encodes on large sources.
+
 ## [2.1.0] - 2026-08-18
 
 ### Changed
@@ -240,6 +273,7 @@ Never published to PyPI; superseded by 1.1.0 before release. Requires Python
 - Scratch files are created in a private per-run directory with
   `tempfile.mkdtemp`.
 
+[2.2.0]: https://github.com/priyadip/ecompress/releases/tag/v2.2.0
 [2.1.0]: https://github.com/priyadip/ecompress/releases/tag/v2.1.0
 [2.0.1]: https://github.com/priyadip/compress-cli/releases/tag/v2.0.1
 [2.0.0]: https://github.com/priyadip/compress-cli/releases/tag/v2.0.0

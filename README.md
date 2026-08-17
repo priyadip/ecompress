@@ -68,7 +68,7 @@ ecompress --check
 ```
 
 ```text
-ecompress 2.1.0
+ecompress 2.2.0
 Python 3.12.10 on Windows 11 (AMD64)
 
 Video and audio (FFmpeg)
@@ -337,8 +337,15 @@ directions. Video with little movement — a screen recording, a slide deck —
 cannot absorb the bitrate it is given: past a point the encoder is already at
 its best quality for that frame size, and more bits change nothing. When that
 happens the spare budget is spent on **pixels instead of bitrate**, climbing
-back towards the source resolution and frame rate until the file fills the
-window. The ceiling is still absolute; the climb stops before crossing it.
+back towards the source resolution and frame rate.
+
+If even the source resolution leaves the budget unspent, the encoder switches
+from targeting an average bitrate to targeting a **quality level** (`-crf`).
+That distinction matters: a bitrate target is a request the encoder may decline
+when the content is simple, whereas lowering the quality number always produces
+more bits. It is what lets a size floor be met at full resolution.
+
+The ceiling is absolute throughout — none of this can cross it.
 
 Both constants are heuristics tuned to established practice, not measurements
 of your specific clip — very high-motion footage or a slideshow will not match

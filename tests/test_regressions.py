@@ -218,6 +218,46 @@ def test_easy_video_climbs_back_up_instead_of_undershooting(tmp_path: Path) -> N
     assert any("raising quality" in note for note in result.notes)
 
 
+@requires_x264
+@pytest.mark.slow
+def test_crf_fills_a_floor_that_bitrate_control_cannot(tmp_path: Path) -> None:
+    """Regression: climbing to the source still left the budget unspent.
+
+    ``-b:v`` asks libx264 for a mean bitrate, and it will not pad a stream with
+    bits the content does not need. On very compressible video it undershoots
+    whatever number it is given - so once the search had climbed all the way to
+    the source resolution there was nowhere left to go, and it stopped short of
+    the floor. ``-crf`` fixes a quality level instead, where lowering it always
+    buys more bits, so it can fill the window at full resolution.
+    """
+    from .conftest import run_ffmpeg
+
+    # Static but detailed: cheap to encode over time, expensive per frame.
+    frame = tmp_path / "frame.png"
+    run_ffmpeg(
+        ["-f", "lavfi", "-i", "testsrc2=size=1920x1080:rate=1:duration=1",
+         "-frames:v", "1", str(frame)]
+    )  # fmt: skip
+    source = tmp_path / "detail.mp4"
+    run_ffmpeg(
+        ["-loop", "1", "-i", str(frame), "-t", "6", "-r", "60",
+         "-c:v", "libx264", "-preset", "veryfast", "-crf", "12",
+         "-pix_fmt", "yuv420p", str(source)]
+    )  # fmt: skip
+
+    original = source.stat().st_size
+    low = original * 0.55 / 1_000_000
+    high = original * 0.75 / 1_000_000
+
+    result = compress(source, f"{low}-{high}")
+
+    assert result.output_size_bytes < int(high * 1_000_000), "the ceiling always holds"
+    assert result.within_requested_range, (
+        f"settled at {result.output_size_bytes} bytes against a "
+        f"{result.min_size_bytes} floor: {result.notes}"
+    )
+
+
 def test_dotted_filename_keeps_only_the_real_extension(tmp_path: Path, source_jpg: Path) -> None:
     """Regression guard for the reported filename shape ``name.ai.mp4``."""
     path = tmp_path / "CasualIQBusinessIntelligence.ai.jpg"

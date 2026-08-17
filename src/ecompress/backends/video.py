@@ -47,8 +47,13 @@ MIN_VIDEO_BITRATE = 24_000
 #: Fraction of the byte budget reserved for container overhead (indexes, moov).
 CONTAINER_OVERHEAD = 0.015
 
-#: CRF ladder used only when the duration is unknown and bitrate maths is impossible.
-CRF_LADDER: tuple[int, ...] = (51, 48, 45, 42, 39, 36, 33, 30, 28, 26, 24, 22)
+#: Quality ladder, ascending (CRF counts down as quality goes up). Used when
+#: the duration is unknown, and to fill a size floor that average-bitrate
+#: control cannot reach.
+CRF_LADDER: tuple[int, ...] = (51, 48, 45, 42, 39, 36, 33, 30, 28, 26, 24, 22, 20, 18, 16)
+
+#: Extra encodes allowed for the CRF fill, on top of the bitrate search.
+CRF_FILL_ENCODES = 4
 
 _H264_ENCODERS = ["libx264", "h264_mf", "libopenh264", "mpeg4"]
 _VP9_ENCODERS = ["libvpx-vp9", "libvpx"]
@@ -287,9 +292,17 @@ class VideoBackend(Backend):
             # cost, and stop re-hunting the bitrate on the way up.
             if spent > 1:
                 saturated = True
-            climb = self._plan_above(
-                ladder, index, video_plan, best_size, job.aim_bytes, fixed_bytes, fps
-            )
+
+            climb: int | None
+            if saturated and index > 0:
+                # When the encoder cannot spend the budget anywhere, the source
+                # resolution is both the largest file and the best quality, so
+                # there is nothing to gain from the rungs in between.
+                climb = 0
+            else:
+                climb = self._plan_above(
+                    ladder, index, video_plan, best_size, job.aim_bytes, fixed_bytes, fps
+                )
             if climb is None:
                 break
             index = climb
@@ -297,6 +310,18 @@ class VideoBackend(Backend):
                 f"{_size(best_size)} is under the requested minimum; "
                 f"raising quality to {ladder[index].describe()}."
             )
+
+        # Still short of the floor with nowhere left to climb. Average-bitrate
+        # control will not emit bits this content does not call for; CRF fixes
+        # a quality level instead, so lowering it always buys more.
+        best = outcome.best
+        if (
+            job.min_bytes is not None
+            and best is not None
+            and best.size_bytes < job.min_bytes
+            and 0 <= index < len(ladder)
+        ):
+            self._crf_fill(job, plan, ladder[index], audio_bps=audio_bps)
 
         if not self._outcome.achieved:
             smallest = ladder[-1]
@@ -306,6 +331,31 @@ class VideoBackend(Backend):
                 + (f" + {_kbps(audio_bps)} audio" if audio_bps else "")
                 + f"), a {duration:.1f}s clip cannot fit in the requested size."
             )
+
+    def _crf_fill(self, job: Job, plan: _Plan, video_plan: VideoPlan, *, audio_bps: int) -> None:
+        """Reach a size floor that average-bitrate control cannot.
+
+        ``-b:v`` asks for a mean bitrate, and libx264 will not pad a stream
+        with bits the content does not need - so on very compressible video it
+        simply undershoots, whatever number it is given. ``-crf`` fixes a
+        quality level instead: lowering it always produces more bits, right
+        down to visually lossless, which is exactly the knob a floor needs.
+        """
+        self.note(
+            "The encoder cannot spend the remaining budget at a fixed bitrate; "
+            "switching to quality-targeted encoding to use it."
+        )
+
+        def encode(crf: int) -> int | None:
+            return self._encode(job, plan, crf=crf, audio_bps=audio_bps, video_plan=video_plan)
+
+        search_discrete_ladder(
+            CRF_LADDER,
+            encode,
+            limit=job.target_bytes,
+            max_evaluations=CRF_FILL_ENCODES,
+            floor=job.min_bytes,
+        )
 
     @staticmethod
     def _plan_above(
