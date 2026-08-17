@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from compress.result import MediaType
-from compress.validation import validate_output
+from ecompress.result import MediaType
+from ecompress.validation import validate_output
 
 from .conftest import requires_ffmpeg, requires_reportlab
 

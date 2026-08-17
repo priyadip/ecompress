@@ -1,8 +1,8 @@
-"""Allow ``python -m compress "file.mp4" 50``."""
+"""Allow ``python -m ecompress "file.mp4" 50``."""
 
 from __future__ import annotations
 
-from compress.cli import main
+from ecompress.cli import main
 
 __all__ = ["main"]
 

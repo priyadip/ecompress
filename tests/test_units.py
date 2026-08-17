@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from compress.units import BYTES_PER_MB, bytes_to_mb, format_mb, format_size, mb_to_bytes
+from ecompress.units import BYTES_PER_MB, bytes_to_mb, format_mb, format_size, mb_to_bytes
 
 
 def test_one_mb_is_one_million_bytes() -> None:

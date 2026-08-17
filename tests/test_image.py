@@ -8,9 +8,9 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-from compress import compress
-from compress.errors import TargetNotAchievableError
-from compress.result import MediaType
+from ecompress import compress
+from ecompress.errors import TargetNotAchievableError
+from ecompress.result import MediaType
 
 from .conftest import requires_avif, requires_webp
 

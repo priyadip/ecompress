@@ -14,7 +14,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from compress.errors import InputFileError
+from ecompress.errors import InputFileError
 
 __all__ = ["COMPRESSED_SUFFIX", "ReservedPath", "reserve_output_path"]
 

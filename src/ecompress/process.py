@@ -15,7 +15,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from compress.errors import MissingDependencyError, ToolExecutionError
+from ecompress.errors import MissingDependencyError, ToolExecutionError
 
 __all__ = ["CommandResult", "run_command"]
 

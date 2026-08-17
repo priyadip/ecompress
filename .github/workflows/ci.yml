@@ -68,7 +68,7 @@ jobs:
         run: python -m pip install -e ".[dev]"
 
       - name: Report what the package found
-        run: python -m compress --check
+        run: python -m ecompress --check
 
       - name: Run tests with coverage
         run: python -m coverage run -m pytest -v
@@ -109,8 +109,8 @@ jobs:
 
       - name: Confirm the system FFmpeg was picked up
         run: |
-          python -m compress --check
-          python -m compress --check --json \
+          python -m ecompress --check
+          python -m ecompress --check --json \
             | python -c "import json,sys; r=json.load(sys.stdin); assert r['ok'], r['problems']; assert r['ffmpeg_source']=='found on this system', r['ffmpeg_source']; print('OK: using', r['ffmpeg'])"
 
       - name: Run the media tests against it
@@ -159,7 +159,7 @@ jobs:
           open('runtime-requirements.txt', 'w').write('\n'.join(
               f\"{i['metadata']['name']}=={i['metadata']['version']}\"
               for i in report['install']
-              if i['metadata']['name'] != 'compress-cli'
+              if i['metadata']['name'] != 'ecompress'
           ))
           print('auditing:', names)
           "
@@ -189,11 +189,11 @@ jobs:
           ./clean-env/bin/python -m pip install dist/*.whl
 
       # Nothing but the wheel is installed here: no system FFmpeg, no PATH
-      # tinkering. If video works, `pip install compress-cli` really is enough.
+      # tinkering. If video works, `pip install ecompress` really is enough.
       - name: Confirm FFmpeg came with the package
         run: |
-          ./clean-env/bin/compress --check
-          ./clean-env/bin/compress --check --json \
+          ./clean-env/bin/ecompress --check
+          ./clean-env/bin/ecompress --check --json \
             | python -c "import json,sys; r=json.load(sys.stdin); assert r['ok'], r['problems']; assert r['ffmpeg_source']=='bundled with this package', r['ffmpeg_source']; print('OK: bundled FFmpeg at', r['ffmpeg'])"
 
       - name: Smoke-test image and video from the clean install
@@ -210,13 +210,13 @@ jobs:
           img.save("smoke.jpg", quality=97)
           PY
 
-          FFMPEG=$(./clean-env/bin/compress --check --json | python -c "import json,sys; print(json.load(sys.stdin)['ffmpeg'])")
+          FFMPEG=$(./clean-env/bin/ecompress --check --json | python -c "import json,sys; print(json.load(sys.stdin)['ffmpeg'])")
           "$FFMPEG" -y -loglevel error -f lavfi -i testsrc2=size=640x480:rate=30:duration=4 \
             -f lavfi -i sine=frequency=440:duration=4 \
             -c:v libx264 -crf 14 -preset veryfast -pix_fmt yuv420p -c:a aac -b:a 128k smoke.mp4
 
-          ./clean-env/bin/compress "smoke.jpg" 0.3
-          ./clean-env/bin/compress "smoke.mp4" 0.25
+          ./clean-env/bin/ecompress "smoke.jpg" 0.3
+          ./clean-env/bin/ecompress "smoke.mp4" 0.25
 
           ./clean-env/bin/python - <<'PY'
           import json, subprocess, sys
@@ -231,7 +231,7 @@ jobs:
               im.load()
           print(f"image OK: {out.stat().st_size} bytes")
 
-          from compress.ffmpeg import find_ffmpeg_tools
+          from ecompress.ffmpeg import find_ffmpeg_tools
           ffprobe = find_ffmpeg_tools().ffprobe
           vid = Path("smoke_compressed.mp4")
           assert vid.stat().st_size < 250_000, f"video target missed: {vid.stat().st_size}"

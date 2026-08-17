@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from compress.errors import MissingDependencyError, ToolExecutionError
-from compress.ffmpeg import (
+from ecompress.errors import MissingDependencyError, ToolExecutionError
+from ecompress.ffmpeg import (
     FFmpegTools,
     clear_ffmpeg_cache,
     find_ffmpeg_tools,

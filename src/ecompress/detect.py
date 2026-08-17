@@ -12,14 +12,14 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from compress.errors import (
+from ecompress.errors import (
     InputFileError,
     MissingDependencyError,
     ToolExecutionError,
     UnsupportedFormatError,
 )
-from compress.ffmpeg import find_ffmpeg_tools, probe
-from compress.result import MediaType
+from ecompress.ffmpeg import find_ffmpeg_tools, probe
+from ecompress.result import MediaType
 
 __all__ = [
     "AUDIO_EXTENSIONS",

@@ -10,9 +10,9 @@ from pathlib import Path
 
 import pytest
 
-from compress import compress
-from compress.errors import TargetNotAchievableError
-from compress.units import mb_to_bytes
+from ecompress import compress
+from ecompress.errors import TargetNotAchievableError
+from ecompress.units import mb_to_bytes
 
 Copier = Callable[..., Path]
 

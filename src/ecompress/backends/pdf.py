@@ -33,11 +33,11 @@ from typing import Any
 import pikepdf
 from PIL import Image
 
-from compress.backends.base import Backend, Job
-from compress.errors import InputFileError, ToolExecutionError
-from compress.process import run_command
-from compress.result import MediaType
-from compress.search import SearchOutcome, search_discrete_ladder
+from ecompress.backends.base import Backend, Job
+from ecompress.errors import InputFileError, ToolExecutionError
+from ecompress.process import run_command
+from ecompress.result import MediaType
+from ecompress.search import SearchOutcome, search_discrete_ladder
 
 __all__ = ["PdfBackend", "find_ghostscript"]
 

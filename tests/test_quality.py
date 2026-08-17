@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pytest
 
-from compress.quality import (
+from ecompress.quality import (
     FRAME_RATE_WEIGHT,
     MIN_FRAME_RATE,
     RESOLUTION_WEIGHT,

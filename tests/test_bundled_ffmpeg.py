@@ -1,7 +1,7 @@
 """FFmpeg that ships with the package.
 
 ``ffmpeg-binaries`` is a normal dependency, so on the common platforms
-``pip install compress-cli`` already puts ffmpeg and ffprobe on disk. These
+``pip install ecompress`` already puts ffmpeg and ffprobe on disk. These
 tests cover finding them, preferring the right copy, and the ``--check``
 report that tells a user what was found.
 """
@@ -17,10 +17,10 @@ from pathlib import Path
 
 import pytest
 
-from compress import ffmpeg as ffmpeg_module
-from compress.cli import EXIT_MISSING_DEPENDENCY, EXIT_OK, main
-from compress.diagnostics import collect, render
-from compress.ffmpeg import (
+from ecompress import ffmpeg as ffmpeg_module
+from ecompress.cli import EXIT_MISSING_DEPENDENCY, EXIT_OK, main
+from ecompress.diagnostics import collect, render
+from ecompress.ffmpeg import (
     FFmpegTools,
     bundled_binary,
     clear_ffmpeg_cache,
@@ -88,7 +88,7 @@ def test_bundled_binary_prefers_the_real_executable_over_the_shim() -> None:
 @requires_bundled
 def test_bundled_binaries_actually_run() -> None:
     """Locating a file is not enough - it has to be a working FFmpeg."""
-    from compress.process import run_command
+    from ecompress.process import run_command
 
     for binary in ("ffmpeg", "ffprobe"):
         path = bundled_binary(binary)
@@ -152,7 +152,7 @@ def test_real_compression_works_with_an_empty_path(
     tmp_path: Path, source_wav: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """End to end with no system FFmpeg reachable at all."""
-    from compress import compress
+    from ecompress import compress
 
     monkeypatch.delenv("COMPRESS_FFMPEG", raising=False)
     monkeypatch.delenv("COMPRESS_FFPROBE", raising=False)
@@ -174,7 +174,7 @@ def test_check_reports_a_healthy_environment(capsys: Capsys) -> None:
     code = main(["--check"])
     out = capsys.readouterr().out
 
-    assert "compress " in out
+    assert "ecompress " in out
     assert "Images (Pillow)" in out
     assert "PDF (pikepdf)" in out
     assert "Video and audio (FFmpeg)" in out
@@ -186,7 +186,7 @@ def test_check_reports_a_healthy_environment(capsys: Capsys) -> None:
 
 def test_check_needs_no_other_arguments(capsys: Capsys) -> None:
     main(["--check"])
-    assert "compress " in capsys.readouterr().out
+    assert "ecompress " in capsys.readouterr().out
 
 
 def test_check_json_is_machine_readable(capsys: Capsys) -> None:
@@ -215,7 +215,7 @@ def test_check_reports_missing_ffmpeg_without_crashing(
     monkeypatch: pytest.MonkeyPatch, capsys: Capsys
 ) -> None:
     monkeypatch.setattr(
-        "compress.diagnostics.find_ffmpeg_tools",
+        "ecompress.diagnostics.find_ffmpeg_tools",
         lambda: FFmpegTools(ffmpeg=None, ffprobe=None),
     )
 
@@ -232,7 +232,7 @@ def test_diagnostics_render_is_stable_without_ffmpeg(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        "compress.diagnostics.find_ffmpeg_tools",
+        "ecompress.diagnostics.find_ffmpeg_tools",
         lambda: FFmpegTools(ffmpeg=None, ffprobe=None),
     )
     report = collect()
@@ -246,12 +246,12 @@ def test_diagnostics_render_is_stable_without_ffmpeg(
 
 
 def test_missing_dependency_message_offers_the_pip_route() -> None:
-    from compress.errors import MissingDependencyError
+    from ecompress.errors import MissingDependencyError
 
     with pytest.raises(MissingDependencyError) as info:
         FFmpegTools(ffmpeg=None, ffprobe=None).require("a video")
 
     message = str(info.value)
-    assert 'pip install "compress-cli[ffmpeg]"' in message
+    assert 'pip install "ecompress[ffmpeg]"' in message
     assert "installed automatically" in message
     assert "COMPRESS_FFMPEG" in message

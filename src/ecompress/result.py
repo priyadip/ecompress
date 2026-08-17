@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from compress.units import bytes_to_mb
+from ecompress.units import bytes_to_mb
 
 __all__ = ["Attempt", "CompressionResult", "MediaType"]
 
@@ -111,7 +111,7 @@ class CompressionResult:
         return self.min_size_bytes is None or self.output_size_bytes >= self.min_size_bytes
 
     def to_dict(self) -> dict[str, Any]:
-        """A JSON-serialisable view, used by ``compress --json``."""
+        """A JSON-serialisable view, used by ``ecompress --json``."""
         return {
             "input_path": str(self.input_path),
             "output_path": str(self.output_path),

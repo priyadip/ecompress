@@ -1,1 +1,1 @@
-"""Test package for compress-cli."""
+"""Test package for ecompress."""

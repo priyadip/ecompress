@@ -16,9 +16,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from compress.errors import MissingDependencyError, ToolExecutionError
-from compress.ffmpeg import probe
-from compress.result import MediaType
+from ecompress.errors import MissingDependencyError, ToolExecutionError
+from ecompress.ffmpeg import probe
+from ecompress.result import MediaType
 
 __all__ = ["ValidationReport", "validate_output"]
 

@@ -6,10 +6,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from compress.detect import Detection
-from compress.reporting import Reporter
-from compress.result import Attempt, MediaType
-from compress.validation import validate_output
+from ecompress.detect import Detection
+from ecompress.reporting import Reporter
+from ecompress.result import Attempt, MediaType
+from ecompress.validation import validate_output
 
 __all__ = ["Backend", "BackendOutcome", "Job"]
 

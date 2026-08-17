@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from compress.units import format_size
+from ecompress.units import format_size
 
 __all__ = [
     "CompressError",

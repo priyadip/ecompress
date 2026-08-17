@@ -1,13 +1,13 @@
 """Compress any file below a target size in MB, with one simple command.
 
-    compress "video.mp4" 50
+    ecompress "video.mp4" 50
 
 The target is a hard ceiling: the produced file is measured on disk and
 re-parsed by an independent reader before the run is called a success.
 
 Python usage::
 
-    from compress import compress
+    from ecompress import compress
 
     result = compress(r"D:\\Videos\\movie.mp4", 50)
     print(result.output_path)
@@ -16,8 +16,8 @@ Python usage::
 
 from __future__ import annotations
 
-from compress.api import compress
-from compress.errors import (
+from ecompress.api import compress
+from ecompress.errors import (
     CompressError,
     InputFileError,
     InvalidTargetError,
@@ -27,11 +27,11 @@ from compress.errors import (
     ToolExecutionError,
     UnsupportedFormatError,
 )
-from compress.reporting import ConsoleReporter, NullReporter, Reporter
-from compress.result import Attempt, CompressionResult, MediaType
-from compress.units import BYTES_PER_MB, bytes_to_mb, format_size, mb_to_bytes
+from ecompress.reporting import ConsoleReporter, NullReporter, Reporter
+from ecompress.result import Attempt, CompressionResult, MediaType
+from ecompress.units import BYTES_PER_MB, bytes_to_mb, format_size, mb_to_bytes
 
-__version__ = "1.3.0"
+__version__ = "2.0.0"
 
 __all__ = [
     "BYTES_PER_MB",

@@ -23,10 +23,10 @@ from typing import Any
 
 from PIL import Image, ImageFile, UnidentifiedImageError
 
-from compress.backends.base import Backend, Job
-from compress.errors import InputFileError
-from compress.result import MediaType
-from compress.search import SearchOutcome, search_discrete_ladder
+from ecompress.backends.base import Backend, Job
+from ecompress.errors import InputFileError
+from ecompress.result import MediaType
+from ecompress.search import SearchOutcome, search_discrete_ladder
 
 __all__ = ["ImageBackend"]
 

@@ -20,7 +20,7 @@ from pathlib import Path
 import pytest
 from PIL import Image, ImageDraw
 
-from compress.ffmpeg import find_ffmpeg_tools, first_available_encoder
+from ecompress.ffmpeg import find_ffmpeg_tools, first_available_encoder
 
 # -- capability detection --------------------------------------------------
 

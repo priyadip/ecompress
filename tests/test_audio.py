@@ -7,10 +7,10 @@ from pathlib import Path
 
 import pytest
 
-from compress import compress
-from compress.errors import TargetNotAchievableError
-from compress.ffmpeg import probe
-from compress.result import MediaType
+from ecompress import compress
+from ecompress.errors import TargetNotAchievableError
+from ecompress.ffmpeg import probe
+from ecompress.result import MediaType
 
 from .conftest import requires_ffmpeg, requires_mp3, requires_opus
 

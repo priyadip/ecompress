@@ -3,8 +3,8 @@ requires = ["hatchling>=1.24"]
 build-backend = "hatchling.build"
 
 [project]
-name = "compress-cli"
-version = "1.3.0"
+name = "ecompress"
+version = "2.0.0"
 description = "Compress any file below a target size in MB with one simple command."
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -44,9 +44,9 @@ dependencies = [
     "pikepdf>=6",
     # FFmpeg (ffmpeg *and* ffprobe) is required for video and audio. It is
     # pulled in automatically on every platform that has a real binary wheel,
-    # so a plain `pip install compress-cli` is all a user needs. Platforms
+    # so a plain `pip install ecompress` is all a user needs. Platforms
     # without one (Linux aarch64, musl, 32-bit Windows) fall back to a system
-    # FFmpeg, and `compress --check` says exactly what was found.
+    # FFmpeg, and `ecompress --check` says exactly what was found.
     "ffmpeg-binaries>=1.1; sys_platform == 'darwin' or (sys_platform == 'win32' and platform_machine == 'AMD64') or (sys_platform == 'linux' and platform_machine == 'x86_64')",
 ]
 
@@ -75,10 +75,10 @@ Issues = "https://github.com/priyadip/compress-cli/issues"
 Changelog = "https://github.com/priyadip/compress-cli/blob/main/CHANGELOG.md"
 
 [project.scripts]
-compress = "compress.cli:main"
+ecompress = "ecompress.cli:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/compress"]
+packages = ["src/ecompress"]
 
 [tool.hatch.build.targets.sdist]
 include = [
@@ -143,11 +143,11 @@ filterwarnings = ["error", "default::DeprecationWarning"]
 
 [tool.coverage.run]
 branch = true
-source = ["compress"]
+source = ["ecompress"]
 parallel = false
 
 [tool.coverage.paths]
-source = ["src/compress", "*/site-packages/compress"]
+source = ["src/ecompress", "*/site-packages/ecompress"]
 
 [tool.coverage.report]
 show_missing = true

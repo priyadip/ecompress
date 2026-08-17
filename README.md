@@ -1,9 +1,9 @@
-# compress
+# ecompress
 
 Compress any file below a target size. One command, two arguments.
 
 ```bash
-compress "D:\Videos\movie.mp4" 50
+ecompress "D:\Videos\movie.mp4" 50
 ```
 
 > Make this file smaller than 50 MB.
@@ -41,22 +41,34 @@ D:\Videos\movie_compressed.mp4
 ## Install
 
 ```bash
-pip install compress-cli
+pip install ecompress
 ```
 
 That is the whole install. **FFmpeg comes with it** — you do not install
 anything separately, and nothing needs to be on your `PATH`. Python 3.10 or
-newer. The distribution is named `compress-cli`; the command and the import
-name are both `compress`.
+newer.
+
+The PyPI name, the command and the import name are all `ecompress`. The
+function you call is still `compress()`:
+
+```python
+from ecompress import compress
+```
+
+> **Renamed in 2.0.** This project was `compress-cli` (command `compress`) up
+> to 1.3.0. The old import name shadowed an unrelated `compress` package on
+> PyPI, and the old command collided with `/usr/bin/compress`, the classic Unix
+> `.Z` tool, on Linux and macOS. Nothing about how it works changed — only the
+> names.
 
 Check what landed on your machine at any time:
 
 ```bash
-compress --check
+ecompress --check
 ```
 
 ```text
-compress 1.3.0
+ecompress 2.0.0
 Python 3.12.10 on Windows 11 (AMD64)
 
 Video and audio (FFmpeg)
@@ -96,18 +108,18 @@ conda env, or your user site-packages. Nothing is written to system
 directories, nothing touches your `PATH`, and uninstalling removes all of it:
 
 ```bash
-pip uninstall compress-cli ffmpeg-binaries
+pip uninstall ecompress ffmpeg-binaries
 ```
 
 ### Platforms without a prebuilt FFmpeg
 
 Windows x64, macOS (Intel and Apple Silicon) and Linux x86_64 get FFmpeg
 automatically. On Linux ARM, Alpine/musl and 32-bit Windows there is no
-prebuilt wheel, so `compress --check` will report it and you have two options:
+prebuilt wheel, so `ecompress --check` will report it and you have two options:
 
 ```bash
-pip install "compress-cli[ffmpeg]"   # fetches a build for your platform
-sudo apt install ffmpeg              # or use your system package manager
+pip install "ecompress[ffmpeg]"   # fetches a build for your platform
+sudo apt install ffmpeg           # or use your system package manager
 ```
 
 A system FFmpeg already on `PATH` is picked up automatically. To point at a
@@ -119,7 +131,7 @@ Images and PDFs never need FFmpeg at all.
 
 The second argument is the **maximum** size of the result in megabytes.
 
-`1 MB = 1,000,000 bytes`, so `compress "video.mp4" 50` guarantees:
+`1 MB = 1,000,000 bytes`, so `ecompress "video.mp4" 50` guarantees:
 
 ```text
 actual_output_bytes < 50,000,000
@@ -147,23 +159,23 @@ a 124.0s clip cannot fit in the requested size.
 
 ```bash
 # Video
-compress "D:\Videos\movie.mp4" 50
-compress "clip.mkv" 8
-compress "screen-recording.webm" 25
+ecompress "D:\Videos\movie.mp4" 50
+ecompress "clip.mkv" 8
+ecompress "screen-recording.webm" 25
 
 # Images
-compress "D:\Photos\holiday.jpg" 5
-compress "screenshot.png" 0.5
-compress "banner.webp" 1
+ecompress "D:\Photos\holiday.jpg" 5
+ecompress "screenshot.png" 0.5
+ecompress "banner.webp" 1
 
 # Audio
-compress "D:\Music\song.wav" 10
-compress "podcast.mp3" 20
-compress "interview.m4a" 5
+ecompress "D:\Music\song.wav" 10
+ecompress "podcast.mp3" 20
+ecompress "interview.m4a" 5
 
 # PDF
-compress "D:\Documents\report.pdf" 2
-compress "scan.pdf" 1.5
+ecompress "D:\Documents\report.pdf" 2
+ecompress "scan.pdf" 1.5
 ```
 
 Fractional targets work: `0.5`, `1.5`, `49.9` are all valid.
@@ -174,7 +186,7 @@ A bare ceiling lets the result land anywhere below it. Give a **range** and the
 budget gets used instead of undershot:
 
 ```bash
-compress "movie.mp4" 40-50     # below 50 MB, but not under 40 MB
+ecompress "movie.mp4" 40-50     # below 50 MB, but not under 40 MB
 ```
 
 `40-50`, `[40,50]`, `40..50` and `--min 40` all mean the same thing.
@@ -319,7 +331,7 @@ them exactly.
 ## Python API
 
 ```python
-from compress import compress
+from ecompress import compress
 
 result = compress(r"D:\Videos\movie.mp4", 50)
 
@@ -376,7 +388,7 @@ All of them subclass `CompressError`:
 | `OutputValidationError`    | a produced file failed its final check         |
 
 ```python
-from compress import compress, TargetNotAchievableError
+from ecompress import compress, TargetNotAchievableError
 
 try:
     result = compress("video.mp4", 0.1)
@@ -402,7 +414,7 @@ Exit codes: `0` success, `1` target not achievable, `2` bad input or usage,
 `3` FFmpeg missing.
 
 ```bash
-compress "movie.mp4" 50 --json
+ecompress "movie.mp4" 50 --json
 ```
 
 ```json
@@ -445,7 +457,7 @@ the target cannot be produced, it says so and writes nothing.
 
 ```bash
 git clone https://github.com/priyadip/compress-cli
-cd compress-cli
+cd ecompress
 pip install -e ".[dev]"
 
 pytest                  # add -m "not slow" to skip real encodes

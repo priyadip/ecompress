@@ -10,8 +10,8 @@ from __future__ import annotations
 import sys
 from typing import IO
 
-from compress.result import Attempt
-from compress.units import format_size
+from ecompress.result import Attempt
+from ecompress.units import format_size
 
 __all__ = ["ConsoleReporter", "NullReporter", "Reporter"]
 

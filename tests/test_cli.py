@@ -8,8 +8,8 @@ from pathlib import Path
 
 import pytest
 
-from compress import __version__
-from compress.cli import (
+from ecompress import __version__
+from ecompress.cli import (
     EXIT_MISSING_DEPENDENCY,
     EXIT_OK,
     EXIT_TARGET_NOT_ACHIEVED,
@@ -176,19 +176,19 @@ def test_missing_ffmpeg_exits_three(
     copy_media: Copier, source_mp4: Path, monkeypatch: pytest.MonkeyPatch, capsys: Capsys
 ) -> None:
     """Simulate a machine without FFmpeg and check the message is actionable."""
-    from compress import ffmpeg as ffmpeg_module
-    from compress.ffmpeg import FFmpegTools
+    from ecompress import ffmpeg as ffmpeg_module
+    from ecompress.ffmpeg import FFmpegTools
 
     monkeypatch.setattr(ffmpeg_module.find_ffmpeg_tools, "__wrapped__", lambda: None, raising=False)
     monkeypatch.setattr(
         ffmpeg_module, "find_ffmpeg_tools", lambda: FFmpegTools(ffmpeg=None, ffprobe=None)
     )
     monkeypatch.setattr(
-        "compress.backends.video.require_ffmpeg",
+        "ecompress.backends.video.require_ffmpeg",
         lambda kind="media": FFmpegTools(None, None).require(kind),
     )
     monkeypatch.setattr(
-        "compress.detect.find_ffmpeg_tools", lambda: FFmpegTools(ffmpeg=None, ffprobe=None)
+        "ecompress.detect.find_ffmpeg_tools", lambda: FFmpegTools(ffmpeg=None, ffprobe=None)
     )
 
     code = main([str(copy_media(source_mp4)), "0.25"])
@@ -200,6 +200,6 @@ def test_missing_ffmpeg_exits_three(
 
 
 def test_module_entry_point_exists() -> None:
-    import compress.__main__ as entry
+    import ecompress.__main__ as entry
 
     assert entry.main is main

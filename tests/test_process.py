@@ -8,8 +8,8 @@ from pathlib import Path
 
 import pytest
 
-from compress.errors import MissingDependencyError, ToolExecutionError
-from compress.process import run_command
+from ecompress.errors import MissingDependencyError, ToolExecutionError
+from ecompress.process import run_command
 
 
 def test_runs_a_command_and_captures_output() -> None:
@@ -61,7 +61,7 @@ def test_never_uses_shell_true() -> None:
     """Guard against a future edit turning shell=True back on."""
     import inspect
 
-    from compress import process
+    from ecompress import process
 
     source = inspect.getsource(process)
     assert "shell=True" not in source

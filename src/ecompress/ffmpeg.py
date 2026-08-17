@@ -13,8 +13,8 @@ from importlib import metadata
 from pathlib import Path
 from typing import Any
 
-from compress.errors import MissingDependencyError, ToolExecutionError
-from compress.process import run_command
+from ecompress.errors import MissingDependencyError, ToolExecutionError
+from ecompress.process import run_command
 
 __all__ = [
     "FFmpegTools",
@@ -48,7 +48,7 @@ def _install_hint() -> str:
     return (
         "Normally FFmpeg is installed automatically with this package. This\n"
         "platform has no prebuilt FFmpeg wheel, so install it one of these ways:\n\n"
-        f'  1.  pip install "compress-cli[ffmpeg]"\n'
+        f'  1.  pip install "ecompress[ffmpeg]"\n'
         f"  2.  {system}"
     )
 
@@ -91,7 +91,7 @@ def bundled_binary(binary: str) -> Path | None:
     """Find ``binary`` inside the ``ffmpeg-binaries`` distribution, if installed.
 
     ``ffmpeg-binaries`` is a normal dependency of this package, so on the common
-    platforms ``pip install compress-cli`` already put ffmpeg and ffprobe on
+    platforms ``pip install ecompress`` already put ffmpeg and ffprobe on
     disk. They are located through the installed distribution's file list rather
     than by importing it: that package's import name is ``ffmpeg``, which
     collides with the unrelated ``ffmpeg-python`` package, and metadata lookup

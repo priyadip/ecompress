@@ -19,7 +19,7 @@ github: [priyadip]
 # polar:            # a single Polar username
 # thanks_dev:       # a single thanks.dev username
 # issuehunt:        # a single IssueHunt username
-# tidelift:         # platform-name/package-name, e.g. pypi/compress-cli
+# tidelift:         # platform-name/package-name, e.g. pypi/ecompress
 # community_bridge: # a single Community Bridge project name
 # lfx_crowdfunding: # a single LFX Crowdfunding project name
 # custom: ["https://example.com/donate"]   # up to 4 custom URLs

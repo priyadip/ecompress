@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from compress.errors import InputFileError
-from compress.naming import reserve_output_path
+from ecompress.errors import InputFileError
+from ecompress.naming import reserve_output_path
 
 
 def _make(path: Path, content: bytes = b"data") -> Path:

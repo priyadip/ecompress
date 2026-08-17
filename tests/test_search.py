@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from compress.search import SearchOutcome, search_discrete_ladder, search_proportional
+from ecompress.search import SearchOutcome, search_discrete_ladder, search_proportional
 
 
 class _Recorder:

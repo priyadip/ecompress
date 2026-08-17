@@ -8,10 +8,10 @@ from pathlib import Path
 
 import pytest
 
-from compress import compress
-from compress.cli import EXIT_OK, EXIT_USAGE, main
-from compress.errors import InvalidTargetError
-from compress.units import SizeRange, parse_size_range
+from ecompress import compress
+from ecompress.cli import EXIT_OK, EXIT_USAGE, main
+from ecompress.errors import InvalidTargetError
+from ecompress.units import SizeRange, parse_size_range
 
 Copier = Callable[..., Path]
 Capsys = pytest.CaptureFixture[str]

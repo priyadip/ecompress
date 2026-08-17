@@ -20,12 +20,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from compress.backends.base import Backend, Job
-from compress.errors import ToolExecutionError
-from compress.ffmpeg import MediaInfo, first_available_encoder, probe, require_ffmpeg
-from compress.process import run_command
-from compress.result import MediaType
-from compress.search import SearchOutcome, search_proportional
+from ecompress.backends.base import Backend, Job
+from ecompress.errors import ToolExecutionError
+from ecompress.ffmpeg import MediaInfo, first_available_encoder, probe, require_ffmpeg
+from ecompress.process import run_command
+from ecompress.result import MediaType
+from ecompress.search import SearchOutcome, search_proportional
 
 __all__ = ["AudioBackend"]
 

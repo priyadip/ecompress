@@ -6,9 +6,9 @@ from pathlib import Path
 
 import pytest
 
-from compress.detect import detect_media_type, sniff_container
-from compress.errors import InputFileError, UnsupportedFormatError
-from compress.result import MediaType
+from ecompress.detect import detect_media_type, sniff_container
+from ecompress.errors import InputFileError, UnsupportedFormatError
+from ecompress.result import MediaType
 
 from .conftest import requires_ffmpeg, requires_reportlab
 

@@ -8,15 +8,15 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-from compress import compress
-from compress.errors import (
+from ecompress import compress
+from ecompress.errors import (
     CompressError,
     InputFileError,
     InvalidTargetError,
     UnsupportedFormatError,
 )
-from compress.reporting import Reporter
-from compress.result import Attempt, CompressionResult, MediaType
+from ecompress.reporting import Reporter
+from ecompress.result import Attempt, CompressionResult, MediaType
 
 Copier = Callable[..., Path]
 

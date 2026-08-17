@@ -9,10 +9,10 @@ from pathlib import Path
 import pikepdf
 import pytest
 
-from compress import compress
-from compress.backends.pdf import PdfBackend, find_ghostscript
-from compress.errors import InputFileError, TargetNotAchievableError
-from compress.result import MediaType
+from ecompress import compress
+from ecompress.backends.pdf import PdfBackend, find_ghostscript
+from ecompress.errors import InputFileError, TargetNotAchievableError
+from ecompress.result import MediaType
 
 from .conftest import requires_reportlab
 
@@ -170,9 +170,9 @@ def test_ghostscript_path_produces_a_valid_pdf(
     copy_media: Copier, tmp_path: Path, source_pdf_images: Path
 ) -> None:
     """Exercise the Ghostscript engine directly, including acceptance."""
-    from compress.backends.base import Job
-    from compress.detect import detect_media_type
-    from compress.reporting import NullReporter
+    from ecompress.backends.base import Job
+    from ecompress.detect import detect_media_type
+    from ecompress.reporting import NullReporter
 
     source = copy_media(source_pdf_images)
     workdir = tmp_path / "work"

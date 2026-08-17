@@ -1,8 +1,8 @@
-"""The ``compress`` command.
+"""The ``ecompress`` command.
 
 Usage is deliberately two arguments::
 
-    compress "PATH" TARGET_MB
+    ecompress "PATH" TARGET_MB
 
 Everything else - codec, CRF, bitrate, quality, resolution, container - is
 decided by the package.
@@ -17,9 +17,9 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import IO
 
-from compress import __version__
-from compress.api import compress as compress_file
-from compress.errors import (
+from ecompress import __version__
+from ecompress.api import compress as compress_file
+from ecompress.errors import (
     CompressError,
     InputFileError,
     InvalidTargetError,
@@ -27,9 +27,9 @@ from compress.errors import (
     TargetNotAchievableError,
     UnsupportedFormatError,
 )
-from compress.reporting import ConsoleReporter
-from compress.result import CompressionResult
-from compress.units import format_size, parse_size_range
+from ecompress.reporting import ConsoleReporter
+from ecompress.result import CompressionResult
+from ecompress.units import format_size, parse_size_range
 
 __all__ = ["build_parser", "main"]
 
@@ -41,11 +41,11 @@ EXIT_INTERRUPTED = 130
 
 _EPILOG = """\
 examples:
-  compress "D:\\Videos\\movie.mp4" 50        compress a video below 50 MB
-  compress "movie.mp4" 40-50                below 50 MB, but not under 40 MB
-  compress "photo.jpg" 2                    compress an image below 2 MB
-  compress "song.wav" 10                    compress audio below 10 MB
-  compress "report.pdf" 5                   compress a PDF below 5 MB
+  ecompress "D:\\Videos\\movie.mp4" 50   compress a video below 50 MB
+  ecompress "movie.mp4" 40-50           below 50 MB, but not under 40 MB
+  ecompress "photo.jpg" 2               compress an image below 2 MB
+  ecompress "song.wav" 10               compress audio below 10 MB
+  ecompress "report.pdf" 5              compress a PDF below 5 MB
 
 A range keeps quality up by using the budget instead of undershooting it.
 40-50, [40,50], 40..50 and --min 40 all mean the same thing.
@@ -53,13 +53,13 @@ A range keeps quality up by using the budget instead of undershooting it.
 The output is written next to the original as <name>_compressed<ext>.
 The original file is never modified. 1 MB = 1,000,000 bytes.
 
-Run  compress --check  to see what is installed on this machine.
+Run  ecompress --check  to see what is installed on this machine.
 """
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="compress",
+        prog="ecompress",
         description="Compress a file below a target size in MB.",
         epilog=_EPILOG,
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -108,7 +108,7 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="SECONDS",
         help="give up on a single encoder run after this long",
     )
-    parser.add_argument("--version", action="version", version=f"compress {__version__}")
+    parser.add_argument("--version", action="version", version=f"ecompress {__version__}")
     return parser
 
 
@@ -126,7 +126,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.path is None or args.target_mb is None:
         parser.error(
             "both a file and a target size are required.\n"
-            'Usage: compress "PATH" TARGET_MB   for example:  compress "video.mp4" 50'
+            'Usage: ecompress "PATH" TARGET_MB   for example:  ecompress "video.mp4" 50'
         )
 
     verbose = not (args.quiet or args.json)
@@ -175,8 +175,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 def _run_check(stream: IO[str], *, as_json: bool = False) -> int:
-    """Handle ``compress --check``. Exit status 0 when nothing is missing."""
-    from compress.diagnostics import collect, render
+    """Handle ``ecompress --check``. Exit status 0 when nothing is missing."""
+    from ecompress.diagnostics import collect, render
 
     report = collect()
     if as_json:
@@ -215,9 +215,9 @@ def _validate_target_syntax(raw: str, minimum: str | None, parser: argparse.Argu
     except ValueError as exc:
         parser.error(
             f"{exc}\n"
-            'Usage: compress "PATH" TARGET_MB\n'
-            '  compress "video.mp4" 50        below 50 MB\n'
-            '  compress "video.mp4" 40-50     below 50 MB but not under 40 MB'
+            'Usage: ecompress "PATH" TARGET_MB\n'
+            '  ecompress "video.mp4" 50        below 50 MB\n'
+            '  ecompress "video.mp4" 40-50     below 50 MB but not under 40 MB'
         )
 
 

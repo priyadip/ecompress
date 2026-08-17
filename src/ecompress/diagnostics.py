@@ -1,4 +1,4 @@
-"""The report behind ``compress --check``.
+"""The report behind ``ecompress --check``.
 
 Answers one question: is everything this package needs actually installed, and
 where did it come from? Nothing here changes state - it only looks.
@@ -12,10 +12,10 @@ from dataclasses import dataclass, field
 from importlib import metadata
 from pathlib import Path
 
-from compress.backends.pdf import find_ghostscript
-from compress.errors import MissingDependencyError, ToolExecutionError
-from compress.ffmpeg import bundled_binary, find_ffmpeg_tools, first_available_encoder
-from compress.process import run_command
+from ecompress.backends.pdf import find_ghostscript
+from ecompress.errors import MissingDependencyError, ToolExecutionError
+from ecompress.ffmpeg import bundled_binary, find_ffmpeg_tools, first_available_encoder
+from ecompress.process import run_command
 
 __all__ = ["Diagnostics", "collect", "render"]
 
@@ -73,7 +73,7 @@ def _tool_version(executable: Path) -> str:
 def collect() -> Diagnostics:
     """Inspect the environment."""
     report = Diagnostics(
-        package_version=_distribution_version("compress-cli") or "unknown",
+        package_version=_distribution_version("ecompress") or "unknown",
         python_version=f"{sys.version_info.major}.{sys.version_info.minor}."
         f"{sys.version_info.micro}",
         platform_name=f"{platform.system()} {platform.release()} ({platform.machine()})",
@@ -126,9 +126,9 @@ def collect() -> Diagnostics:
 
 
 def render(report: Diagnostics) -> str:
-    """Format the report the way ``compress --check`` prints it."""
+    """Format the report the way ``ecompress --check`` prints it."""
     lines: list[str] = [
-        "compress " + report.package_version,
+        "ecompress " + report.package_version,
         f"Python {report.python_version} on {report.platform_name}",
         "",
         "Video and audio (FFmpeg)",

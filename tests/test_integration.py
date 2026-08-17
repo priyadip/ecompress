@@ -17,8 +17,8 @@ from typing import Any, cast
 
 import pytest
 
-from compress.cli import EXIT_OK, main
-from compress.ffmpeg import find_ffmpeg_tools
+from ecompress.cli import EXIT_OK, main
+from ecompress.ffmpeg import find_ffmpeg_tools
 
 from .conftest import requires_ffmpeg, requires_mp3, requires_reportlab, requires_x264
 
@@ -47,7 +47,7 @@ def ffprobe_json(path: Path) -> dict[str, Any]:
 @requires_x264
 @pytest.mark.slow
 def test_user_compresses_a_video(copy_media: Copier, source_mp4: Path, capsys: Capsys) -> None:
-    """compress "test_video.mp4" 0.2 - then check it with ffprobe."""
+    """ecompress "test_video.mp4" 0.2 - then check it with ffprobe."""
     source = copy_media(source_mp4, "test_video.mp4")
     original = ffprobe_json(source)
     original_duration = float(original["format"]["duration"])
@@ -72,7 +72,7 @@ def test_user_compresses_a_video(copy_media: Copier, source_mp4: Path, capsys: C
 @requires_mp3
 @pytest.mark.slow
 def test_user_compresses_audio(copy_media: Copier, source_wav: Path, capsys: Capsys) -> None:
-    """compress "test.wav" 0.2"""
+    """ecompress "test.wav" 0.2"""
     source = copy_media(source_wav, "test.wav")
     original_duration = float(ffprobe_json(source)["format"]["duration"])
 
@@ -93,7 +93,7 @@ def test_user_compresses_audio(copy_media: Copier, source_wav: Path, capsys: Cap
 
 
 def test_user_compresses_an_image(copy_media: Copier, source_jpg: Path, capsys: Capsys) -> None:
-    """compress "test.jpg" 0.3 - then open it with Pillow."""
+    """ecompress "test.jpg" 0.3 - then open it with Pillow."""
     from PIL import Image
 
     source = copy_media(source_jpg, "test.jpg")
@@ -117,7 +117,7 @@ def test_user_compresses_an_image(copy_media: Copier, source_jpg: Path, capsys: 
 
 @requires_reportlab
 def test_user_compresses_a_pdf(copy_media: Copier, source_pdf_images: Path, capsys: Capsys) -> None:
-    """compress "test.pdf" 0.2 - then open it with pikepdf."""
+    """ecompress "test.pdf" 0.2 - then open it with pikepdf."""
     import pikepdf
 
     source = copy_media(source_pdf_images, "test.pdf")
@@ -144,10 +144,10 @@ def test_user_compresses_a_pdf(copy_media: Copier, source_pdf_images: Path, caps
 
 
 def _console_script() -> str | None:
-    return shutil.which("compress")
+    return shutil.which("ecompress")
 
 
-@pytest.mark.skipif(_console_script() is None, reason="the compress script is not on PATH")
+@pytest.mark.skipif(_console_script() is None, reason="the ecompress script is not on PATH")
 def test_installed_console_script_works(copy_media: Copier, source_jpg: Path) -> None:
     """Run the actual `compress` executable, exactly as a user would."""
     source = copy_media(source_jpg, "console test.jpg")
@@ -172,7 +172,7 @@ def test_installed_console_script_works(copy_media: Copier, source_jpg: Path) ->
 def test_python_m_compress_works(copy_media: Copier, source_jpg: Path) -> None:
     source = copy_media(source_jpg, "module test.jpg")
     completed = subprocess.run(  # noqa: S603 - fixed argument list, shell=False
-        [sys.executable, "-m", "compress", str(source), "0.3", "--quiet"],
+        [sys.executable, "-m", "ecompress", str(source), "0.3", "--quiet"],
         capture_output=True,
         text=True,
         check=False,
@@ -188,7 +188,7 @@ def test_python_m_compress_works(copy_media: Copier, source_jpg: Path) -> None:
 @requires_ffmpeg
 def test_readme_promise_holds(copy_media: Copier, source_jpg: Path) -> None:
     """The exact snippet the README shows to users."""
-    from compress import compress
+    from ecompress import compress
 
     result = compress(copy_media(source_jpg), 0.5)
 

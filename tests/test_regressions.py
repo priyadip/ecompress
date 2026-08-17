@@ -14,11 +14,11 @@ from pathlib import Path
 import pytest
 from PIL import Image, ImageFile
 
-from compress import compress
-from compress.errors import UnsupportedFormatError
-from compress.result import MediaType
-from compress.search import SearchOutcome, search_discrete_ladder, search_proportional
-from compress.validation import validate_output
+from ecompress import compress
+from ecompress.errors import UnsupportedFormatError
+from ecompress.result import MediaType
+from ecompress.search import SearchOutcome, search_discrete_ladder, search_proportional
+from ecompress.validation import validate_output
 
 Copier = Callable[..., Path]
 
@@ -130,8 +130,8 @@ def test_skip_path_does_not_require_ffmpeg(
     copy_media: Copier, source_mp4: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Regression guard: detection before the skip must not need FFmpeg."""
-    from compress import detect as detect_module
-    from compress.ffmpeg import FFmpegTools
+    from ecompress import detect as detect_module
+    from ecompress.ffmpeg import FFmpegTools
 
     monkeypatch.setattr(
         detect_module, "find_ffmpeg_tools", lambda: FFmpegTools(ffmpeg=None, ffprobe=None)

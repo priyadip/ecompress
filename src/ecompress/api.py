@@ -21,23 +21,23 @@ import shutil
 import tempfile
 from pathlib import Path
 
-from compress.backends.audio import AudioBackend
-from compress.backends.base import Backend, BackendOutcome, Job
-from compress.backends.image import ImageBackend
-from compress.backends.pdf import PdfBackend
-from compress.backends.video import VideoBackend
-from compress.detect import detect_media_type
-from compress.errors import (
+from ecompress.backends.audio import AudioBackend
+from ecompress.backends.base import Backend, BackendOutcome, Job
+from ecompress.backends.image import ImageBackend
+from ecompress.backends.pdf import PdfBackend
+from ecompress.backends.video import VideoBackend
+from ecompress.detect import detect_media_type
+from ecompress.errors import (
     InputFileError,
     InvalidTargetError,
     OutputValidationError,
     TargetNotAchievableError,
 )
-from compress.naming import ReservedPath, reserve_output_path
-from compress.reporting import NullReporter, Reporter
-from compress.result import CompressionResult, MediaType
-from compress.units import SizeRange, format_size, parse_size_range
-from compress.validation import validate_output
+from ecompress.naming import ReservedPath, reserve_output_path
+from ecompress.reporting import NullReporter, Reporter
+from ecompress.result import CompressionResult, MediaType
+from ecompress.units import SizeRange, format_size, parse_size_range
+from ecompress.validation import validate_output
 
 __all__ = ["compress"]
 
@@ -260,8 +260,8 @@ def _validate_target(target_mb: object, min_mb: object = None) -> SizeRange:
     except ValueError as exc:
         raise InvalidTargetError(
             f"{exc}\n\nGive the target as a number of megabytes, for example:\n"
-            '  compress "video.mp4" 50        below 50 MB\n'
-            '  compress "video.mp4" 40-50     below 50 MB but not under 40 MB'
+            '  ecompress "video.mp4" 50        below 50 MB\n'
+            '  ecompress "video.mp4" 40-50     below 50 MB but not under 40 MB'
         ) from exc
 
 

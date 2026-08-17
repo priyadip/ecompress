@@ -5,6 +5,40 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.0] - 2026-08-17
+
+Renamed. **No functional changes** - every behaviour in 1.3.0 is identical.
+
+### Changed
+
+- **The project is now ecompress.** The PyPI name, the console command and
+  the import name all changed together:
+
+  | | Before (1.3.0) | Now (2.0.0) |
+  | --- | --- | --- |
+  | Install | pip install compress-cli | pip install ecompress |
+  | Command | compress file.mp4 50 | ecompress file.mp4 50 |
+  | Import | 
+rom compress import compress | 
+rom ecompress import compress |
+
+  The function is still called compress().
+
+  Two reasons. The import name compress shadowed an unrelated package of that
+  name on PyPI, so installing both broke one of them. More seriously, the
+  command compress collided with /usr/bin/compress - the classic Unix .Z
+  tool - on Linux and macOS, where either could shadow the other depending on
+  PATH order.
+
+### Migration
+
+Replace compress with ecompress in install commands, shell invocations and
+imports. Calls to compress(...) in Python are unchanged.
+
+compress-cli 1.1.0-1.3.0 remain on PyPI and keep working; they will not be
+updated further. Entries below describe those releases as they shipped, under
+their original names.
+
 ## [1.3.0] - 2026-08-17
 
 ### Added
@@ -150,6 +184,7 @@ Never published to PyPI; superseded by 1.1.0 before release. Requires Python
 - Scratch files are created in a private per-run directory with
   `tempfile.mkdtemp`.
 
+[2.0.0]: https://github.com/priyadip/compress-cli/releases/tag/v2.0.0
 [1.3.0]: https://github.com/priyadip/compress-cli/releases/tag/v1.3.0
 [1.2.0]: https://github.com/priyadip/compress-cli/releases/tag/v1.2.0
 [1.1.0]: https://github.com/priyadip/compress-cli/releases/tag/v1.1.0

@@ -51,7 +51,7 @@ jobs:
         run: |
           python -m venv verify-env
           ./verify-env/bin/python -m pip install --quiet dist/*.whl
-          ./verify-env/bin/compress --check
+          ./verify-env/bin/ecompress --check
 
           ./verify-env/bin/python - <<'PY'
           import random
@@ -65,7 +65,7 @@ jobs:
           img.save("smoke.jpg", quality=97)
           PY
 
-          ./verify-env/bin/compress "smoke.jpg" 0.3
+          ./verify-env/bin/ecompress "smoke.jpg" 0.3
           ./verify-env/bin/python - <<'PY'
           from pathlib import Path
           from PIL import Image

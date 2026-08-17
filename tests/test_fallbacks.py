@@ -14,9 +14,9 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-from compress import compress
-from compress.reporting import ConsoleReporter
-from compress.result import Attempt
+from ecompress import compress
+from ecompress.reporting import ConsoleReporter
+from ecompress.result import Attempt
 
 from .conftest import requires_webp, requires_x264
 
@@ -69,7 +69,7 @@ def test_a_damaged_jpeg_is_still_compressed(tmp_path: Path, source_jpg: Path) ->
 
 
 def test_unreadable_image_gives_a_clear_error(tmp_path: Path) -> None:
-    from compress.errors import InputFileError
+    from ecompress.errors import InputFileError
 
     path = tmp_path / "fake.png"
     path.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 20_000)
@@ -89,8 +89,8 @@ def test_video_without_duration_uses_the_quality_search(
     """Bitrate targeting is impossible without a duration; CRF search takes over."""
     from dataclasses import replace
 
-    from compress.backends import video as video_module
-    from compress.ffmpeg import probe as real_probe
+    from ecompress.backends import video as video_module
+    from ecompress.ffmpeg import probe as real_probe
 
     def probe_without_duration(path: Path, **kwargs: object) -> object:
         return replace(real_probe(path), duration=None)
@@ -140,7 +140,7 @@ def test_an_impossible_timeout_fails_without_claiming_success(
     copy_media: Copier, source_mp4: Path
 ) -> None:
     """A timeout must abort the encode, never produce a bogus "success"."""
-    from compress.errors import TargetNotAchievableError
+    from ecompress.errors import TargetNotAchievableError
 
     with pytest.raises(TargetNotAchievableError):
         compress(copy_media(source_mp4), 0.25, timeout=0.001)
@@ -151,7 +151,7 @@ def test_an_impossible_timeout_fails_without_claiming_success(
 def test_timeout_leaves_no_partial_output(
     copy_media: Copier, tmp_path: Path, source_mp4: Path
 ) -> None:
-    from compress.errors import TargetNotAchievableError
+    from ecompress.errors import TargetNotAchievableError
 
     source = copy_media(source_mp4)
     with pytest.raises(TargetNotAchievableError):
