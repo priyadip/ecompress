@@ -31,7 +31,7 @@ from compress.reporting import ConsoleReporter, NullReporter, Reporter
 from compress.result import Attempt, CompressionResult, MediaType
 from compress.units import BYTES_PER_MB, bytes_to_mb, format_size, mb_to_bytes
 
-__version__ = "1.1.0"
+__version__ = "1.2.0"
 
 __all__ = [
     "BYTES_PER_MB",

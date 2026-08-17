@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "compress-cli"
-version = "1.1.0"
+version = "1.2.0"
 description = "Compress any file below a target size in MB with one simple command."
 readme = "README.md"
 license = { file = "LICENSE" }

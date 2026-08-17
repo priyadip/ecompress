@@ -56,7 +56,7 @@ compress --check
 ```
 
 ```text
-compress 1.1.0
+compress 1.2.0
 Python 3.12.10 on Windows 11 (AMD64)
 
 Video and audio (FFmpeg)
