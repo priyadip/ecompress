@@ -42,18 +42,26 @@ jobs:
       # Ghostscript only: FFmpeg is a dependency of the package itself, so the
       # install step below brings it. Installing a system FFmpeg here as well
       # would hide a broken bundle.
+      #
+      # Ghostscript is genuinely optional - PDFs compress through pikepdf
+      # without it, and its tests skip when it is absent - so a flaky package
+      # mirror must not fail the run. `continue-on-error` keeps the coverage
+      # when the install works and drops it quietly when it does not.
       - name: Install Ghostscript (Linux)
         if: runner.os == 'Linux'
+        continue-on-error: true
         run: |
           sudo apt-get update
           sudo apt-get install -y ghostscript
 
       - name: Install Ghostscript (macOS)
         if: runner.os == 'macOS'
+        continue-on-error: true
         run: brew install ghostscript
 
       - name: Install Ghostscript (Windows)
         if: runner.os == 'Windows'
+        continue-on-error: true
         run: choco install ghostscript --no-progress --yes
 
       - name: Install the package
