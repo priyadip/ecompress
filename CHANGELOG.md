@@ -5,6 +5,33 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.1] - 2026-08-17
+
+### Fixed
+
+- **Easily-compressed video no longer settles far below the requested size.**
+  Content with little movement — a screen recording, a slide deck, a talking
+  head on a static background — cannot absorb the bitrate it is given. Past a
+  point the encoder is already at its best quality for that frame size and
+  tripling the bitrate produces the same file.
+
+  The search only knew how to move *down* the quality ladder, so it accepted
+  that undersized result: a 151 MB 4K recording asked for 40-50 MB came back as
+  12.5 MB of 576p, when the budget could have paid for something far sharper.
+
+  It now recognises a saturated encoder and spends the spare budget on **pixels
+  instead of bitrate**, climbing back towards the source resolution and frame
+  rate. The step size comes from the measured bits-per-pixel of the encode that
+  undershot, so it converges in a few attempts rather than crawling one rung at
+  a time, and the bitrate hunt is skipped on the way up because it is already
+  known not to help.
+
+  The ceiling is still absolute — climbing stops the moment a candidate would
+  cross it.
+
+- Derived frame rates are no longer reported with false precision: a 62.4999 fps
+  source now halves to `31.25 fps` rather than `31.2499 fps`.
+
 ## [2.0.0] - 2026-08-17
 
 Renamed. **No functional changes** - every behaviour in 1.3.0 is identical.
@@ -184,6 +211,7 @@ Never published to PyPI; superseded by 1.1.0 before release. Requires Python
 - Scratch files are created in a private per-run directory with
   `tempfile.mkdtemp`.
 
+[2.0.1]: https://github.com/priyadip/compress-cli/releases/tag/v2.0.1
 [2.0.0]: https://github.com/priyadip/compress-cli/releases/tag/v2.0.0
 [1.3.0]: https://github.com/priyadip/compress-cli/releases/tag/v1.3.0
 [1.2.0]: https://github.com/priyadip/compress-cli/releases/tag/v1.2.0

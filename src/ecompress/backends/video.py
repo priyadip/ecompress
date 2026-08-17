@@ -25,7 +25,13 @@ from ecompress.backends.base import Backend, Job
 from ecompress.errors import ToolExecutionError
 from ecompress.ffmpeg import MediaInfo, first_available_encoder, probe, require_ffmpeg
 from ecompress.process import run_command
-from ecompress.quality import VideoPlan, build_plan_ladder
+from ecompress.quality import (
+    VideoPlan,
+    build_plan_ladder,
+    index_for_pixel_rate,
+    pixel_rate,
+    recommended_index,
+)
 from ecompress.result import MediaType
 from ecompress.search import SearchOutcome, search_discrete_ladder, search_proportional
 
@@ -209,24 +215,31 @@ class VideoBackend(Backend):
 
         # Resolution and frame rate are chosen together: for a thin budget,
         # giving up frames is usually cheaper than giving up pixels.
-        ladder = build_plan_ladder(
-            width=width, height=height, source_fps=fps, video_bitrate=initial_bps
-        )
-        first = ladder[0]
+        ladder = build_plan_ladder(width=width, height=height, source_fps=fps)
+        index = recommended_index(ladder, video_bitrate=initial_bps, source_fps=fps)
+
+        first = ladder[index]
         if (first.width, first.height) != (width, height) or first.changes_frame_rate:
             self.note(
                 f"{_kbps(initial_bps)} is not enough for {width}x{height} at "
-                f"{fps:g} fps; using {first.describe()} instead."
+                f"{_fps(fps)}; using {first.describe()} instead."
             )
 
         outcome: SearchOutcome[int] = SearchOutcome()
         used = 0
-        for index, video_plan in enumerate(ladder):
+        visited: set[int] = set()
+        # Once the encoder has proved it cannot spend the budget at one frame
+        # size, it will not spend it at another either - the content is simply
+        # easy. Further steps then need one measurement each, not a bitrate
+        # hunt, which is what makes climbing several rungs affordable.
+        saturated = False
+
+        while 0 <= index < len(ladder) and index not in visited:
             remaining = MAX_ENCODES - used
             if remaining <= 0:
                 break
-            if index > 0:
-                self.note(f"Stepping down to {video_plan.describe()} to reach the target.")
+            visited.add(index)
+            video_plan = ladder[index]
 
             def encode(bitrate: int, video_plan: VideoPlan = video_plan) -> int | None:
                 return self._encode(
@@ -241,13 +254,40 @@ class VideoBackend(Backend):
                 minimum=MIN_VIDEO_BITRATE,
                 maximum=max(maximum_bps, MIN_VIDEO_BITRATE),
                 fixed_overhead_bytes=fixed_bytes,
-                max_evaluations=remaining,
+                max_evaluations=1 if saturated else remaining,
                 floor=job.min_bytes,
                 outcome=outcome,
             )
-            used += outcome.evaluations - before
-            if outcome.best is not None:
+            spent = outcome.evaluations - before
+            used += spent
+
+            if outcome.best is None:
+                # Too big even at the lowest usable bitrate: step down.
+                index += 1
+                if index < len(ladder):
+                    self.note(f"Stepping down to {ladder[index].describe()} to fit.")
+                continue
+
+            best_size = outcome.best.size_bytes
+            if job.min_bytes is None or best_size >= job.min_bytes:
                 return
+
+            # Under the floor despite the bitrate search having had room to
+            # raise it: this content cannot absorb more bits at this frame
+            # size. Buy pixels instead, sized from what the encode actually
+            # cost, and stop re-hunting the bitrate on the way up.
+            if spent > 1:
+                saturated = True
+            climb = self._plan_above(
+                ladder, index, video_plan, best_size, job.aim_bytes, fixed_bytes, fps
+            )
+            if climb is None:
+                break
+            index = climb
+            self.note(
+                f"{_size(best_size)} is under the requested minimum; "
+                f"raising quality to {ladder[index].describe()}."
+            )
 
         if not self._outcome.achieved:
             smallest = ladder[-1]
@@ -257,6 +297,36 @@ class VideoBackend(Backend):
                 + (f" + {_kbps(audio_bps)} audio" if audio_bps else "")
                 + f"), a {duration:.1f}s clip cannot fit in the requested size."
             )
+
+    @staticmethod
+    def _plan_above(
+        ladder: list[VideoPlan],
+        index: int,
+        current: VideoPlan,
+        measured_bytes: int,
+        aim_bytes: int,
+        fixed_bytes: int,
+        source_fps: float,
+    ) -> int | None:
+        """Pick a higher-quality plan sized from the measured bits-per-pixel.
+
+        Bits scale roughly with pixel count for the same content, so if this
+        encode used a fraction of the budget, the pixel rate can grow by
+        about the reciprocal of that fraction.
+        """
+        if index == 0:
+            return None
+        measured_video = max(measured_bytes - fixed_bytes, 1)
+        desired_video = aim_bytes - fixed_bytes
+        if desired_video <= measured_video:
+            return None
+
+        wanted = pixel_rate(current, source_fps) * (desired_video / measured_video)
+        candidate = index_for_pixel_rate(ladder, required=wanted, source_fps=source_fps)
+        # Must actually move up, and never past the top of the ladder.
+        if candidate >= index:
+            candidate = index - 1
+        return max(candidate, 0)
 
     def _crf_search(self, job: Job, plan: _Plan, width: int, height: int) -> None:
         """Quality-based fallback for sources with no readable duration."""
@@ -384,6 +454,16 @@ def _source_video_bitrate(info: MediaInfo) -> int | None:
         if remainder > 0:
             return remainder
     return None
+
+
+def _fps(rate: float) -> str:
+    return f"{round(rate, 2):g} fps"
+
+
+def _size(num_bytes: int) -> str:
+    from ecompress.units import format_size
+
+    return format_size(num_bytes)
 
 
 def _kbps(bits_per_second: int) -> str:

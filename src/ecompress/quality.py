@@ -44,6 +44,9 @@ __all__ = [
     "ACCEPTABLE_BITS_PER_PIXEL",
     "VideoPlan",
     "build_plan_ladder",
+    "index_for_pixel_rate",
+    "pixel_rate",
+    "recommended_index",
     "required_bitrate",
 ]
 
@@ -102,6 +105,19 @@ def _even(value: int) -> int:
     return max(2, value - (value % 2))
 
 
+def _tidy_fps(value: float) -> float:
+    """Round a derived rate so it reads cleanly (31.24995 -> 31.25)."""
+    rounded = round(value, 2)
+    nearest_int = round(rounded)
+    return float(nearest_int) if abs(rounded - nearest_int) < 0.02 else rounded
+
+
+def pixel_rate(plan: VideoPlan, source_fps: float) -> float:
+    """Pixels per second this plan encodes - what bitrate demand tracks."""
+    fps = plan.fps if plan.fps > 0 else source_fps
+    return float(plan.width * plan.height * (fps if fps > 0 else 30.0))
+
+
 def frame_rate_options(source_fps: float) -> list[float]:
     """Frame rates worth considering, highest first.
 
@@ -112,7 +128,8 @@ def frame_rate_options(source_fps: float) -> list[float]:
         return [0.0]
 
     candidates = [source_fps]
-    for option in (source_fps / 2.0, 30.0, 24.0):
+    for raw in (source_fps / 2.0, 30.0, 24.0):
+        option = _tidy_fps(raw)
         if option < MIN_FRAME_RATE - 0.01 or option >= source_fps:
             continue
         if any(abs(option - kept) < _FRAME_RATE_TOLERANCE for kept in candidates):
@@ -139,14 +156,14 @@ def build_plan_ladder(
     width: int,
     height: int,
     source_fps: float,
-    video_bitrate: int,
 ) -> list[VideoPlan]:
-    """Rank (resolution, frame rate) combinations for a bitrate, best first.
+    """Every (resolution, frame rate) combination, best quality first.
 
-    Combinations the budget can actually pay for come first, ordered by the
-    quality score. Unaffordable ones follow in the same order, so a search that
-    exhausts the affordable options still has somewhere to go rather than
-    failing outright.
+    The list is ordered purely by the quality score, from the source itself
+    down to the smallest option, and is independent of any bitrate. Which entry
+    to *start* at is a separate question - see :func:`recommended_index` - and
+    the caller is free to walk in either direction once real measurements
+    arrive, because a bitrate estimate is only a prior.
     """
     resolutions = resolution_options(width, height)
     if not resolutions:
@@ -156,9 +173,7 @@ def build_plan_ladder(
     source_pixels = float(width * height) or 1.0
     reference_fps = source_fps if source_fps > 0 else 30.0
 
-    affordable: list[tuple[float, VideoPlan]] = []
-    beyond: list[tuple[float, VideoPlan]] = []
-
+    scored: list[tuple[float, VideoPlan]] = []
     for target_width, target_height in resolutions:
         for fps in rates:
             effective_fps = fps if fps > 0 else reference_fps
@@ -168,15 +183,35 @@ def build_plan_ladder(
             # Leave the source rate untouched when it is already the choice.
             keep_rate = abs(effective_fps - source_fps) < _FRAME_RATE_TOLERANCE
             plan = VideoPlan(target_width, target_height, 0.0 if keep_rate else effective_fps)
+            scored.append((score, plan))
 
-            needed = required_bitrate(target_width, target_height, effective_fps)
-            (affordable if video_bitrate >= needed else beyond).append((score, plan))
+    scored.sort(key=lambda item: item[0], reverse=True)
+    return _deduplicate([plan for _, plan in scored])
 
-    affordable.sort(key=lambda item: item[0], reverse=True)
-    beyond.sort(key=lambda item: item[0], reverse=True)
 
-    ordered = [plan for _, plan in affordable] + [plan for _, plan in beyond]
-    return _deduplicate(ordered)
+def recommended_index(ladder: list[VideoPlan], *, video_bitrate: int, source_fps: float) -> int:
+    """Where to start: the best plan the bitrate is predicted to sustain.
+
+    This is a prior, not a verdict. Content far easier or harder to encode than
+    the model assumes will be corrected by measurement.
+    """
+    for index, plan in enumerate(ladder):
+        fps = plan.fps if plan.fps > 0 else source_fps
+        if video_bitrate >= required_bitrate(plan.width, plan.height, fps):
+            return index
+    return len(ladder) - 1
+
+
+def index_for_pixel_rate(ladder: list[VideoPlan], *, required: float, source_fps: float) -> int:
+    """The best plan whose pixel rate does not exceed ``required``.
+
+    Used after an encode comes in under budget: the measured bits-per-pixel
+    says how many more pixels the remaining bytes can pay for.
+    """
+    for index, plan in enumerate(ladder):
+        if pixel_rate(plan, source_fps) <= required:
+            return index
+    return len(ladder) - 1
 
 
 def _deduplicate(plans: list[VideoPlan]) -> list[VideoPlan]:

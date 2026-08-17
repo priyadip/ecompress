@@ -68,7 +68,7 @@ ecompress --check
 ```
 
 ```text
-ecompress 2.0.0
+ecompress 2.0.1
 Python 3.12.10 on Windows 11 (AMD64)
 
 Video and audio (FFmpeg)
@@ -323,6 +323,14 @@ Every affordable combination is then ranked, weighting resolution above frame
 rate, and the best one is encoded. Frame rate is never reduced below 24 fps,
 never raised, and never touched at all when the budget comfortably covers the
 source.
+
+That first choice is only a prediction, and measurement overrides it in **both**
+directions. Video with little movement — a screen recording, a slide deck —
+cannot absorb the bitrate it is given: past a point the encoder is already at
+its best quality for that frame size, and more bits change nothing. When that
+happens the spare budget is spent on **pixels instead of bitrate**, climbing
+back towards the source resolution and frame rate until the file fills the
+window. The ceiling is still absolute; the climb stops before crossing it.
 
 Both constants are heuristics tuned to established practice, not measurements
 of your specific clip — very high-motion footage or a slideshow will not match

@@ -20,6 +20,8 @@ from ecompress.result import MediaType
 from ecompress.search import SearchOutcome, search_discrete_ladder, search_proportional
 from ecompress.validation import validate_output
 
+from .conftest import requires_x264
+
 Copier = Callable[..., Path]
 
 
@@ -171,6 +173,49 @@ def test_damaged_image_does_not_leak_a_file_handle(tmp_path: Path, source_jpg: P
         gc.collect()
 
     assert result.output_size_bytes < 200_000
+
+
+@requires_x264
+@pytest.mark.slow
+def test_easy_video_climbs_back_up_instead_of_undershooting(tmp_path: Path) -> None:
+    """Regression: a saturated encoder made the search give up far too small.
+
+    Highly compressible video (a near-static screen recording) cannot absorb
+    the bitrate it is given: past a point, tripling the bitrate produces the
+    same file. The search only knew how to step *down* the quality ladder, so
+    it settled at a fraction of the requested size - a 151 MB 4K source asked
+    to land in 40-50 MB came back as 12.5 MB of 576p. The fix spends the spare
+    budget on pixels instead, climbing back towards the source.
+    """
+    from .conftest import run_ffmpeg
+
+    source = tmp_path / "static.mp4"
+    run_ffmpeg(
+        [
+            "-f", "lavfi", "-i", "color=c=0x1e2430:size=1920x1080:rate=60:duration=8",
+            "-f", "lavfi", "-i", "sine=frequency=440:duration=8",
+            "-vf", "drawbox=x=60:y=60:w=1800:h=960:color=white@0.25:t=8",
+            "-c:v", "libx264", "-preset", "veryfast", "-crf", "18",
+            "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "128k",
+            str(source),
+        ]
+    )  # fmt: skip
+
+    original = source.stat().st_size
+    low = original * 0.35 / 1_000_000
+    high = original * 0.50 / 1_000_000
+
+    result = compress(source, f"{low}-{high}")
+
+    assert result.output_size_bytes < int(high * 1_000_000), "the ceiling always holds"
+    assert result.within_requested_range, (
+        f"settled at {result.output_size_bytes} bytes, under the "
+        f"{result.min_size_bytes} floor: {result.notes}"
+    )
+    # It should have climbed rather than stayed at the starving frame size.
+    accepted = [a for a in result.attempts if a.accepted]
+    assert accepted
+    assert any("raising quality" in note for note in result.notes)
 
 
 def test_dotted_filename_keeps_only_the_real_extension(tmp_path: Path, source_jpg: Path) -> None:

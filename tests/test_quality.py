@@ -15,6 +15,9 @@ from ecompress.quality import (
     VideoPlan,
     build_plan_ladder,
     frame_rate_options,
+    index_for_pixel_rate,
+    pixel_rate,
+    recommended_index,
     required_bitrate,
     resolution_options,
 )
@@ -107,36 +110,43 @@ def test_resolution_options_are_even() -> None:
 # -- the joint ladder ------------------------------------------------------
 
 
-def test_a_generous_budget_keeps_the_source_untouched() -> None:
-    ladder = build_plan_ladder(width=1280, height=720, source_fps=60, video_bitrate=50_000_000)
-    best = ladder[0]
-    assert (best.width, best.height) == (1280, 720)
-    assert not best.changes_frame_rate, "no reason to touch frame rate here"
+def test_the_ladder_always_starts_at_the_source() -> None:
+    """Index 0 is the untouched source; a bitrate only chooses where to enter."""
+    ladder = build_plan_ladder(width=1280, height=720, source_fps=60)
+    assert (ladder[0].width, ladder[0].height) == (1280, 720)
+    assert not ladder[0].changes_frame_rate
+
+
+def test_a_generous_budget_starts_at_the_source() -> None:
+    ladder = build_plan_ladder(width=1280, height=720, source_fps=60)
+    start = ladder[recommended_index(ladder, video_bitrate=50_000_000, source_fps=60)]
+    assert (start.width, start.height) == (1280, 720)
+    assert not start.changes_frame_rate, "no reason to touch frame rate here"
 
 
 def test_a_thin_budget_drops_frame_rate_before_resolution() -> None:
     """The core of the feature."""
-    ladder = build_plan_ladder(width=1920, height=1080, source_fps=60, video_bitrate=900_000)
-    best = ladder[0]
+    budget = 900_000
+    ladder = build_plan_ladder(width=1920, height=1080, source_fps=60)
+    start = ladder[recommended_index(ladder, video_bitrate=budget, source_fps=60)]
 
-    reduced_fps_only = build_plan_ladder(
-        width=1920, height=1080, source_fps=30, video_bitrate=900_000
-    )[0]
+    slower = build_plan_ladder(width=1920, height=1080, source_fps=30)
+    slower_start = slower[recommended_index(slower, video_bitrate=budget, source_fps=30)]
 
     # At 60fps the same budget must buy no more pixels than it would at 30fps.
-    assert best.width * best.height <= reduced_fps_only.width * reduced_fps_only.height
-    assert best.changes_frame_rate, "frame rate should have been traded first"
+    assert start.width * start.height <= slower_start.width * slower_start.height
+    assert start.changes_frame_rate, "frame rate should have been traded first"
 
 
 def test_the_reported_4k_case_keeps_far_more_detail() -> None:
     """3840x2160 @ 62fps into a 50 MB budget: the case that motivated this."""
-    ladder = build_plan_ladder(width=3840, height=2160, source_fps=62, video_bitrate=965_000)
-    best = ladder[0]
+    ladder = build_plan_ladder(width=3840, height=2160, source_fps=62)
+    start = ladder[recommended_index(ladder, video_bitrate=965_000, source_fps=62)]
 
     # The old resolution-only rule landed on 640x360 at the full 62 fps.
-    assert best.width * best.height > 640 * 360, "should beat the old 360p result"
-    assert best.changes_frame_rate
-    assert best.fps < 62
+    assert start.width * start.height > 640 * 360, "should beat the old 360p result"
+    assert start.changes_frame_rate
+    assert start.fps < 62
 
 
 def _effective_fps(plan: VideoPlan, source_fps: float) -> float:
@@ -150,39 +160,54 @@ def _score(plan: VideoPlan, width: int, height: int, source_fps: float) -> float
     return float(pixels**RESOLUTION_WEIGHT * rate**FRAME_RATE_WEIGHT)
 
 
-def test_affordable_plans_come_before_unaffordable_ones() -> None:
+def test_recommended_index_picks_the_first_affordable_plan() -> None:
     budget = 900_000
-    ladder = build_plan_ladder(width=1920, height=1080, source_fps=60, video_bitrate=budget)
+    fps = 60.0
+    ladder = build_plan_ladder(width=1920, height=1080, source_fps=fps)
 
-    affordable_flags = [
-        required_bitrate(p.width, p.height, _effective_fps(p, 60)) <= budget for p in ladder
-    ]
-    assert any(affordable_flags), "at least one combination must be affordable"
-    # Once the list turns unaffordable it must never turn back.
-    first_unaffordable = affordable_flags.index(False) if False in affordable_flags else len(ladder)
-    assert all(affordable_flags[:first_unaffordable])
-    assert not any(affordable_flags[first_unaffordable:])
+    start = recommended_index(ladder, video_bitrate=budget, source_fps=fps)
+
+    chosen = ladder[start]
+    assert required_bitrate(chosen.width, chosen.height, _effective_fps(chosen, fps)) <= budget
+    # Everything ranked above it must genuinely be out of reach.
+    for plan in ladder[:start]:
+        assert required_bitrate(plan.width, plan.height, _effective_fps(plan, fps)) > budget
 
 
-def test_affordable_plans_are_ordered_by_descending_quality() -> None:
-    budget = 900_000
+def test_the_whole_ladder_is_ordered_by_descending_quality() -> None:
     width, height, fps = 1920, 1080, 60.0
-    ladder = build_plan_ladder(width=width, height=height, source_fps=fps, video_bitrate=budget)
-    affordable = [
-        p for p in ladder if required_bitrate(p.width, p.height, _effective_fps(p, fps)) <= budget
-    ]
+    ladder = build_plan_ladder(width=width, height=height, source_fps=fps)
 
-    scores = [_score(p, width, height, fps) for p in affordable]
+    scores = [_score(p, width, height, fps) for p in ladder]
     assert scores == sorted(scores, reverse=True), "quality ranking is out of order"
 
 
+def test_index_for_pixel_rate_never_exceeds_what_was_asked_for() -> None:
+    fps = 60.0
+    ladder = build_plan_ladder(width=1920, height=1080, source_fps=fps)
+
+    for wanted in (1e5, 1e6, 1e7, 5e7, 1e9):
+        index = index_for_pixel_rate(ladder, required=wanted, source_fps=fps)
+        chosen = pixel_rate(ladder[index], fps)
+        # Either it fits the budget, or we are already at the smallest option.
+        assert chosen <= wanted or index == len(ladder) - 1
+        if index > 0:
+            assert pixel_rate(ladder[index - 1], fps) > wanted
+
+
+def test_index_for_pixel_rate_returns_the_source_when_budget_is_huge() -> None:
+    fps = 60.0
+    ladder = build_plan_ladder(width=1920, height=1080, source_fps=fps)
+    assert index_for_pixel_rate(ladder, required=1e12, source_fps=fps) == 0
+
+
 def test_ladder_has_no_duplicates() -> None:
-    ladder = build_plan_ladder(width=1920, height=1080, source_fps=60, video_bitrate=1_000_000)
+    ladder = build_plan_ladder(width=1920, height=1080, source_fps=60)
     assert len(ladder) == len(set(ladder))
 
 
 def test_ladder_never_upscales() -> None:
-    ladder = build_plan_ladder(width=640, height=360, source_fps=30, video_bitrate=100_000_000)
+    ladder = build_plan_ladder(width=640, height=360, source_fps=30)
     for plan in ladder:
         assert plan.width <= 640
         assert plan.height <= 360
@@ -191,14 +216,14 @@ def test_ladder_never_upscales() -> None:
 
 def test_an_impossible_budget_still_offers_something() -> None:
     """Nothing is affordable, but the search must have somewhere to go."""
-    ladder = build_plan_ladder(width=1920, height=1080, source_fps=60, video_bitrate=1)
+    ladder = build_plan_ladder(width=1920, height=1080, source_fps=60)
     assert ladder, "must never return an empty ladder"
     smallest = ladder[-1]
     assert smallest.width > 0
 
 
 def test_unknown_dimensions_are_survivable() -> None:
-    ladder = build_plan_ladder(width=0, height=0, source_fps=30, video_bitrate=500_000)
+    ladder = build_plan_ladder(width=0, height=0, source_fps=30)
     assert ladder == [VideoPlan(0, 0, 0.0)]
 
 
