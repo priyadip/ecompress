@@ -1,0 +1,244 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+  PYTHONUTF8: "1"
+
+jobs:
+  test:
+    name: test (${{ matrix.os }}, py${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+        # Keep the matrix affordable: only the newest Python on every OS,
+        # plus the full Python range on Linux.
+        exclude:
+          - { os: windows-latest, python-version: "3.10" }
+          - { os: windows-latest, python-version: "3.11" }
+          - { os: macos-latest, python-version: "3.10" }
+          - { os: macos-latest, python-version: "3.11" }
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      # Ghostscript only: FFmpeg is a dependency of the package itself, so the
+      # install step below brings it. Installing a system FFmpeg here as well
+      # would hide a broken bundle.
+      - name: Install Ghostscript (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ghostscript
+
+      - name: Install Ghostscript (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ghostscript
+
+      - name: Install Ghostscript (Windows)
+        if: runner.os == 'Windows'
+        run: choco install ghostscript --no-progress --yes
+
+      - name: Install the package
+        run: python -m pip install -e ".[dev]"
+
+      - name: Report what the package found
+        run: python -m compress --check
+
+      - name: Run tests with coverage
+        run: python -m coverage run -m pytest -v
+
+      - name: Coverage report
+        run: |
+          python -m coverage report
+          python -m coverage xml
+
+      - name: Upload coverage
+        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-xml
+          path: coverage.xml
+
+  system-ffmpeg:
+    name: fall back to a system FFmpeg
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install a system FFmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+
+      # Prove the package still works for users on a platform with no prebuilt
+      # FFmpeg wheel, where discovery has to fall through to PATH.
+      - name: Install without the bundled FFmpeg
+        run: |
+          python -m pip install -e ".[dev]"
+          python -m pip uninstall -y ffmpeg-binaries
+
+      - name: Confirm the system FFmpeg was picked up
+        run: |
+          python -m compress --check
+          python -m compress --check --json \
+            | python -c "import json,sys; r=json.load(sys.stdin); assert r['ok'], r['problems']; assert r['ffmpeg_source']=='found on this system', r['ffmpeg_source']; print('OK: using', r['ffmpeg'])"
+
+      - name: Run the media tests against it
+        run: python -m pytest -v
+
+  quality:
+    name: lint, format and types
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: python -m pip install -e ".[dev]"
+
+      - name: Ruff lint
+        run: python -m ruff check --output-format=github .
+
+      - name: Ruff format check
+        run: python -m ruff format --check .
+
+      - name: mypy
+        run: python -m mypy .
+
+  security:
+    name: security audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Audit the runtime dependency tree only
+        run: |
+          python -m pip install pip-audit
+          # Audit what a user actually installs, not the dev tool-chain.
+          python -m pip install --dry-run --report audit-report.json .
+          python -c "
+          import json
+          report = json.load(open('audit-report.json'))
+          names = [i['metadata']['name'] for i in report['install']]
+          open('runtime-requirements.txt', 'w').write('\n'.join(
+              f\"{i['metadata']['name']}=={i['metadata']['version']}\"
+              for i in report['install']
+              if i['metadata']['name'] != 'compress-cli'
+          ))
+          print('auditing:', names)
+          "
+          python -m pip_audit --requirement runtime-requirements.txt --strict
+
+  build:
+    name: build and verify the distribution
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Build wheel and sdist
+        run: |
+          python -m pip install build twine
+          python -m build
+
+      - name: Validate metadata
+        run: python -m twine check dist/*
+
+      - name: Install the wheel into a clean environment
+        run: |
+          python -m venv clean-env
+          ./clean-env/bin/python -m pip install dist/*.whl
+
+      # Nothing but the wheel is installed here: no system FFmpeg, no PATH
+      # tinkering. If video works, `pip install compress-cli` really is enough.
+      - name: Confirm FFmpeg came with the package
+        run: |
+          ./clean-env/bin/compress --check
+          ./clean-env/bin/compress --check --json \
+            | python -c "import json,sys; r=json.load(sys.stdin); assert r['ok'], r['problems']; assert r['ffmpeg_source']=='bundled with this package', r['ffmpeg_source']; print('OK: bundled FFmpeg at', r['ffmpeg'])"
+
+      - name: Smoke-test image and video from the clean install
+        run: |
+          ./clean-env/bin/python - <<'PY'
+          import random
+          from PIL import Image
+          rnd = random.Random(1)
+          img = Image.new("RGB", (1200, 900))
+          px = img.load()
+          for y in range(900):
+              for x in range(1200):
+                  px[x, y] = (rnd.randint(0, 255), rnd.randint(0, 255), rnd.randint(0, 255))
+          img.save("smoke.jpg", quality=97)
+          PY
+
+          FFMPEG=$(./clean-env/bin/compress --check --json | python -c "import json,sys; print(json.load(sys.stdin)['ffmpeg'])")
+          "$FFMPEG" -y -loglevel error -f lavfi -i testsrc2=size=640x480:rate=30:duration=4 \
+            -f lavfi -i sine=frequency=440:duration=4 \
+            -c:v libx264 -crf 14 -preset veryfast -pix_fmt yuv420p -c:a aac -b:a 128k smoke.mp4
+
+          ./clean-env/bin/compress "smoke.jpg" 0.3
+          ./clean-env/bin/compress "smoke.mp4" 0.25
+
+          ./clean-env/bin/python - <<'PY'
+          import json, subprocess, sys
+          from pathlib import Path
+          from PIL import Image
+
+          out = Path("smoke_compressed.jpg")
+          assert out.stat().st_size < 300_000, f"image target missed: {out.stat().st_size}"
+          with Image.open(out) as im:
+              im.verify()
+          with Image.open(out) as im:
+              im.load()
+          print(f"image OK: {out.stat().st_size} bytes")
+
+          from compress.ffmpeg import find_ffmpeg_tools
+          ffprobe = find_ffmpeg_tools().ffprobe
+          vid = Path("smoke_compressed.mp4")
+          assert vid.stat().st_size < 250_000, f"video target missed: {vid.stat().st_size}"
+          info = json.loads(subprocess.run(
+              [str(ffprobe), "-v", "error", "-print_format", "json",
+               "-show_format", "-show_streams", "-i", str(vid)],
+              capture_output=True, check=True).stdout)
+          kinds = {s["codec_type"] for s in info["streams"]}
+          assert "video" in kinds and "audio" in kinds, kinds
+          assert abs(float(info["format"]["duration"]) - 4.0) < 0.5
+          print(f"video OK: {vid.stat().st_size} bytes, streams={sorted(kinds)}")
+          PY
+
+      - name: Upload distributions
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
