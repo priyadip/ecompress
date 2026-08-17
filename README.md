@@ -265,8 +265,8 @@ from compress import compress
 
 result = compress(r"D:\Videos\movie.mp4", 50)
 
-print(result.output_path)       # D:\Videos\movie_compressed.mp4
-print(result.output_size_mb)    # 48.87
+print(result.output_path)  # D:\Videos\movie_compressed.mp4
+print(result.output_size_mb)  # 48.87
 assert result.output_size_bytes < 50_000_000
 ```
 
@@ -294,10 +294,10 @@ Optional keyword arguments:
 compress(
     path,
     target_mb,
-    output_path=None,   # write somewhere specific
-    reporter=None,      # progress callbacks; ConsoleReporter() prints them
-    overwrite=False,    # allow output_path to replace an existing file
-    timeout=None,       # seconds per encoder invocation
+    output_path=None,  # write somewhere specific
+    reporter=None,  # progress callbacks; ConsoleReporter() prints them
+    overwrite=False,  # allow output_path to replace an existing file
+    timeout=None,  # seconds per encoder invocation
 )
 ```
 
@@ -320,7 +320,7 @@ from compress import compress, TargetNotAchievableError
 try:
     result = compress("video.mp4", 0.1)
 except TargetNotAchievableError as exc:
-    print(exc.smallest_valid_bytes)   # what was actually achievable
+    print(exc.smallest_valid_bytes)  # what was actually achievable
 ```
 
 ## Command-line options
