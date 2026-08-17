@@ -1,0 +1,25 @@
+# Adds a "Sponsor" button to the repository page.
+# Docs: https://docs.github.com/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/displaying-a-sponsor-button-in-your-repository
+#
+# The GitHub entry below only shows a button once GitHub Sponsors is enabled
+# for the account, at https://github.com/sponsors — it is free to join and the
+# button stays hidden until then.
+#
+# Uncomment any other platform you actually use and put your username after the
+# colon. Leave the rest commented out: an entry pointing at an account that
+# does not exist produces a dead link.
+
+github: [priyadip]
+
+# patreon:          # a single Patreon username
+# open_collective:  # a single Open Collective username
+# ko_fi:            # a single Ko-fi username
+# buy_me_a_coffee:  # a single Buy Me a Coffee username
+# liberapay:        # a single Liberapay username
+# polar:            # a single Polar username
+# thanks_dev:       # a single thanks.dev username
+# issuehunt:        # a single IssueHunt username
+# tidelift:         # platform-name/package-name, e.g. pypi/compress-cli
+# community_bridge: # a single Community Bridge project name
+# lfx_crowdfunding: # a single LFX Crowdfunding project name
+# custom: ["https://example.com/donate"]   # up to 4 custom URLs
