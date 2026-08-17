@@ -146,4 +146,9 @@ jobs:
       - uses: pypa/gh-action-pypi-publish@release/v1
         with:
           password: ${{ secrets.PYPI_API_TOKEN }}
+          # A version already on PyPI is left alone rather than failing the
+          # run, so re-running a release is harmless. The flip side: forgetting
+          # to bump the version makes this a silent no-op, so check the job
+          # summary for "uploaded" rather than assuming a green tick shipped.
+          skip-existing: true
           print-hash: true
