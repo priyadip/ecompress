@@ -9,11 +9,14 @@ from __future__ import annotations
 import pytest
 
 from ecompress.quality import (
+    ACCEPTABLE_BITS_PER_PIXEL,
     FRAME_RATE_WEIGHT,
+    MIN_BITS_PER_PIXEL,
     MIN_FRAME_RATE,
     RESOLUTION_WEIGHT,
     VideoPlan,
     build_plan_ladder,
+    calibrate_bits_per_pixel,
     frame_rate_options,
     index_for_pixel_rate,
     pixel_rate,
@@ -193,6 +196,81 @@ def test_index_for_pixel_rate_never_exceeds_what_was_asked_for() -> None:
         assert chosen <= wanted or index == len(ladder) - 1
         if index > 0:
             assert pixel_rate(ladder[index - 1], fps) > wanted
+
+
+# -- calibrating from the source -------------------------------------------
+
+
+def test_calibration_needs_real_numbers() -> None:
+    for kwargs in (
+        {"video_bitrate": None, "width": 1920, "height": 1080, "fps": 30},
+        {"video_bitrate": 0, "width": 1920, "height": 1080, "fps": 30},
+        {"video_bitrate": 5_000_000, "width": 0, "height": 1080, "fps": 30},
+        {"video_bitrate": 5_000_000, "width": 1920, "height": 1080, "fps": 0},
+    ):
+        assert calibrate_bits_per_pixel(**kwargs) is None
+
+
+def test_easy_content_measures_below_the_generic_constant() -> None:
+    """A near-static 4K recording is far cheaper than typical footage."""
+    measured = calibrate_bits_per_pixel(video_bitrate=3_330_000, width=3840, height=2160, fps=62.5)
+    assert measured is not None
+    assert measured < ACCEPTABLE_BITS_PER_PIXEL
+    assert measured == pytest.approx(0.26, abs=0.05)
+
+
+def test_calibration_can_only_lower_the_requirement() -> None:
+    """A lavish source shows the content *can* take bits, not that it needs them.
+
+    Without this cap, a visually-lossless source would be judged unable to hold
+    its own resolution at 90% of its own bitrate - plainly wrong, and it made
+    high-quality clips lose frame rate for no reason.
+    """
+    lavish = calibrate_bits_per_pixel(video_bitrate=200_000_000, width=1920, height=1080, fps=30)
+    assert lavish == ACCEPTABLE_BITS_PER_PIXEL
+
+
+def test_a_crushed_source_hits_the_floor() -> None:
+    crushed = calibrate_bits_per_pixel(video_bitrate=1, width=3840, height=2160, fps=60)
+    assert crushed == MIN_BITS_PER_PIXEL
+
+
+def test_calibration_moves_the_starting_plan_up_for_easy_content() -> None:
+    """The reported case: the generic constant started far too low."""
+    width, height, fps = 3840, 2160, 62.5
+    budget = 965_000
+    ladder = build_plan_ladder(width=width, height=height, source_fps=fps)
+
+    generic = ladder[recommended_index(ladder, video_bitrate=budget, source_fps=fps)]
+    measured = calibrate_bits_per_pixel(
+        video_bitrate=3_330_000, width=width, height=height, fps=fps
+    )
+    assert measured is not None
+    calibrated = ladder[
+        recommended_index(ladder, video_bitrate=budget, source_fps=fps, bits_per_pixel=measured)
+    ]
+
+    assert calibrated.width * calibrated.height > generic.width * generic.height * 3, (
+        f"calibration should have started far higher: {generic} -> {calibrated}"
+    )
+
+
+def test_calibration_does_not_disturb_ordinary_footage() -> None:
+    """Content matching the generic assumption should land in the same place."""
+    width, height, fps = 1920, 1080, 30.0
+    # A bitrate that measures out at roughly the default constant.
+    typical = int(ACCEPTABLE_BITS_PER_PIXEL * width * height)
+    ladder = build_plan_ladder(width=width, height=height, source_fps=fps)
+
+    measured = calibrate_bits_per_pixel(video_bitrate=typical, width=width, height=height, fps=fps)
+    assert measured == pytest.approx(ACCEPTABLE_BITS_PER_PIXEL, rel=0.01)
+
+    budget = 2_000_000
+    generic = recommended_index(ladder, video_bitrate=budget, source_fps=fps)
+    calibrated = recommended_index(
+        ladder, video_bitrate=budget, source_fps=fps, bits_per_pixel=measured
+    )
+    assert generic == calibrated
 
 
 def test_index_for_pixel_rate_returns_the_source_when_budget_is_huge() -> None:

@@ -42,8 +42,10 @@ from typing import NamedTuple
 
 __all__ = [
     "ACCEPTABLE_BITS_PER_PIXEL",
+    "MIN_BITS_PER_PIXEL",
     "VideoPlan",
     "build_plan_ladder",
+    "calibrate_bits_per_pixel",
     "index_for_pixel_rate",
     "pixel_rate",
     "recommended_index",
@@ -51,7 +53,13 @@ __all__ = [
 ]
 
 #: Bits per pixel per second at 30 fps. ~3.0 is visually good, ~1.5 acceptable.
+#: Used only when the source itself cannot be measured.
 ACCEPTABLE_BITS_PER_PIXEL = 1.5
+
+#: Floor on a source-measured value, so a crushed source cannot send the
+#: opening guess somewhere absurd. The ceiling is the generic constant itself:
+#: see :func:`calibrate_bits_per_pixel`.
+MIN_BITS_PER_PIXEL = 0.15
 
 #: Doubling frame rate costs ~1.5x the bitrate, not 2x: log2(1.5).
 FPS_EXPONENT = 0.585
@@ -93,11 +101,49 @@ class VideoPlan(NamedTuple):
         return label
 
 
-def required_bitrate(width: int, height: int, fps: float) -> float:
-    """Bits per second needed for this combination to look acceptable."""
+def required_bitrate(
+    width: int,
+    height: int,
+    fps: float,
+    *,
+    bits_per_pixel: float = ACCEPTABLE_BITS_PER_PIXEL,
+) -> float:
+    """Bits per second needed for this combination to look acceptable.
+
+    ``bits_per_pixel`` defaults to the generic constant, but a caller that has
+    measured the actual source should pass that instead - see
+    :func:`calibrate_bits_per_pixel`.
+    """
     if width <= 0 or height <= 0 or fps <= 0:
         return 0.0
-    return float(ACCEPTABLE_BITS_PER_PIXEL * width * height * (fps / 30.0) ** FPS_EXPONENT)
+    return float(bits_per_pixel * width * height * (fps / 30.0) ** FPS_EXPONENT)
+
+
+def calibrate_bits_per_pixel(
+    *, video_bitrate: int | None, width: int, height: int, fps: float
+) -> float | None:
+    """Derive what this content costs per pixel, from the source encode.
+
+    The generic constant describes typical footage. Real sources vary enormously
+    - a near-static screen recording can be five or ten times more compressible
+    than live action - and the source's own bitrate measures exactly that, for
+    free, before a single frame is re-encoded.
+
+    The result can only ever *lower* the requirement, never raise it. A lavish
+    source shows the content **can** absorb a lot of bits, not that it needs
+    them: the goal here is an acceptable result, not one matching the original.
+    Without that cap, a visually-lossless source would be judged unable to keep
+    its own resolution at 90% of its own bitrate, which is plainly wrong.
+
+    Returns ``None`` when the source does not carry enough information.
+    """
+    if not video_bitrate or width <= 0 or height <= 0 or fps <= 0:
+        return None
+    demand = width * height * (fps / 30.0) ** FPS_EXPONENT
+    if demand <= 0:
+        return None
+    measured = float(video_bitrate / demand)
+    return max(MIN_BITS_PER_PIXEL, min(measured, ACCEPTABLE_BITS_PER_PIXEL))
 
 
 def _even(value: int) -> int:
@@ -189,15 +235,24 @@ def build_plan_ladder(
     return _deduplicate([plan for _, plan in scored])
 
 
-def recommended_index(ladder: list[VideoPlan], *, video_bitrate: int, source_fps: float) -> int:
+def recommended_index(
+    ladder: list[VideoPlan],
+    *,
+    video_bitrate: int,
+    source_fps: float,
+    bits_per_pixel: float | None = None,
+) -> int:
     """Where to start: the best plan the bitrate is predicted to sustain.
 
     This is a prior, not a verdict. Content far easier or harder to encode than
-    the model assumes will be corrected by measurement.
+    predicted is still corrected by measurement - but passing a
+    source-calibrated ``bits_per_pixel`` makes the opening guess close enough
+    that little correction is needed.
     """
+    density = bits_per_pixel if bits_per_pixel is not None else ACCEPTABLE_BITS_PER_PIXEL
     for index, plan in enumerate(ladder):
         fps = plan.fps if plan.fps > 0 else source_fps
-        if video_bitrate >= required_bitrate(plan.width, plan.height, fps):
+        if video_bitrate >= required_bitrate(plan.width, plan.height, fps, bits_per_pixel=density):
             return index
     return len(ladder) - 1
 

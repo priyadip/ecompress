@@ -5,6 +5,35 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.0] - 2026-08-18
+
+### Changed
+
+- **The opening guess is now calibrated from the source instead of a generic
+  constant.** 2.0.1 could recover from a bad first guess by climbing, but it
+  still *started* from an assumption about typical footage — and then spent
+  several encodes discovering the assumption was wrong.
+
+  The source file already answers the question. Its bitrate, resolution and
+  frame rate give a measured bits-per-pixel for this specific content, free,
+  before anything is re-encoded. A 4K 62.5 fps screen recording at 3.3 Mbps
+  measures 0.26 against the generic 1.5 — 5.7x more compressible — and the
+  starting plan moves accordingly:
+
+  | | Starting plan | Pixels per frame |
+  | --- | --- | --- |
+  | Generic constant | 1024x576 @ 31.25 fps | 589,824 |
+  | Source-calibrated | 2560x1440 @ 24 fps | 3,686,400 (6.2x) |
+
+  The measurement can only ever *lower* the requirement, never raise it: a
+  visually-lossless source shows the content **can** absorb bits, not that it
+  needs them. Without that cap a high-quality clip would be judged unable to
+  hold its own resolution at 90% of its own bitrate, and would lose frame rate
+  for no reason. A crushed source is floored for the same reason in reverse.
+
+  The measurement-driven climb from 2.0.1 is unchanged and still corrects
+  whatever the opening guess gets wrong; it now has far less to correct.
+
 ## [2.0.1] - 2026-08-17
 
 ### Fixed
@@ -211,6 +240,7 @@ Never published to PyPI; superseded by 1.1.0 before release. Requires Python
 - Scratch files are created in a private per-run directory with
   `tempfile.mkdtemp`.
 
+[2.1.0]: https://github.com/priyadip/ecompress/releases/tag/v2.1.0
 [2.0.1]: https://github.com/priyadip/compress-cli/releases/tag/v2.0.1
 [2.0.0]: https://github.com/priyadip/compress-cli/releases/tag/v2.0.0
 [1.3.0]: https://github.com/priyadip/compress-cli/releases/tag/v1.3.0

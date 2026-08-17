@@ -28,6 +28,7 @@ from ecompress.process import run_command
 from ecompress.quality import (
     VideoPlan,
     build_plan_ladder,
+    calibrate_bits_per_pixel,
     index_for_pixel_rate,
     pixel_rate,
     recommended_index,
@@ -214,9 +215,17 @@ class VideoBackend(Backend):
         maximum_bps = min(source_bps, initial_bps * 4) if source_bps else initial_bps * 4
 
         # Resolution and frame rate are chosen together: for a thin budget,
-        # giving up frames is usually cheaper than giving up pixels.
+        # giving up frames is usually cheaper than giving up pixels. How thin
+        # the budget really is depends on the content, and the source's own
+        # bitrate measures that before anything is re-encoded - a near-static
+        # screen recording needs a fraction of what live action does.
+        density = calibrate_bits_per_pixel(
+            video_bitrate=source_bps, width=width, height=height, fps=fps
+        )
         ladder = build_plan_ladder(width=width, height=height, source_fps=fps)
-        index = recommended_index(ladder, video_bitrate=initial_bps, source_fps=fps)
+        index = recommended_index(
+            ladder, video_bitrate=initial_bps, source_fps=fps, bits_per_pixel=density
+        )
 
         first = ladder[index]
         if (first.width, first.height) != (width, height) or first.changes_frame_rate:

@@ -68,7 +68,7 @@ ecompress --check
 ```
 
 ```text
-ecompress 2.0.1
+ecompress 2.1.0
 Python 3.12.10 on Windows 11 (AMD64)
 
 Video and audio (FFmpeg)
@@ -316,8 +316,16 @@ frame rate costs about **1.5x** the bitrate rather than 2x — consecutive frame
 are more alike the faster you sample:
 
 ```text
-required_bitrate = 1.5 * width * height * (fps / 30) ** 0.585
+required_bitrate = bits_per_pixel * width * height * (fps / 30) ** 0.585
 ```
+
+`bits_per_pixel` is **measured from your own file**, not assumed. The source's
+bitrate, resolution and frame rate give the figure for free, before anything is
+re-encoded — and content varies enormously. A near-static screen recording
+measures around `0.26` where typical footage sits near `1.5`, so it keeps far
+more resolution for the same budget. (The measurement can only lower the
+requirement, never raise it: a lavish source proves the content *can* absorb
+bits, not that it needs them.)
 
 Every affordable combination is then ranked, weighting resolution above frame
 rate, and the best one is encoded. Frame rate is never reduced below 24 fps,
