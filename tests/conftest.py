@@ -239,6 +239,12 @@ def source_mp4_hd(media_root: Path) -> Path:
 
 
 @pytest.fixture(scope="session")
+def source_mp4_high_fps(media_root: Path) -> Path:
+    """720p at 60 fps: enough frames that trading rate for pixels pays off."""
+    return make_video(media_root / "highfps.mp4", seconds=4.0, size="1280x720", fps=60)
+
+
+@pytest.fixture(scope="session")
 def source_mkv(media_root: Path) -> Path:
     return make_video(media_root / "clip.mkv", seconds=3.0, size="480x360")
 

@@ -225,6 +225,7 @@ class AudioBackend(Backend):
                 maximum=profile.max_bps,
                 fixed_overhead_bytes=overhead,
                 max_evaluations=remaining,
+                floor=job.min_bytes,
                 outcome=outcome,
             )
             used += outcome.evaluations - before

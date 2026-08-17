@@ -77,6 +77,7 @@ def search_discrete_ladder(
     limit: int,
     max_evaluations: int = 10,
     good_enough_ratio: float = 0.90,
+    floor: int | None = None,
     outcome: SearchOutcome[T] | None = None,
 ) -> SearchOutcome[T]:
     """Binary-search an ascending-quality ladder for the best setting that fits.
@@ -88,9 +89,11 @@ def search_discrete_ladder(
             ``None`` when that setting could not produce a valid file.
         limit: the hard ceiling; results must be strictly below it.
         max_evaluations: never call ``encode`` more than this many times.
-        good_enough_ratio: stop early once a result lands in
-            ``[ratio * limit, limit)`` - it is close enough to the ceiling that
-            further searching would not meaningfully improve quality.
+        good_enough_ratio: when no explicit ``floor`` is given, stop once a
+            result lands in ``[ratio * limit, limit)`` - close enough to the
+            ceiling that more searching would not meaningfully improve quality.
+        floor: an explicit lower bound in bytes, from a user-supplied size
+            range. The search keeps climbing until a result reaches it.
         outcome: reuse an existing outcome (lets a caller run several ladders,
             e.g. one per resolution, and keep the global best).
 
@@ -104,7 +107,7 @@ def search_discrete_ladder(
     # Start at the top: the best possible quality is the answer whenever it fits.
     low, high = 0, len(settings) - 1
     probe = high
-    target_floor = int(limit * good_enough_ratio)
+    target_floor = floor if floor is not None else int(limit * good_enough_ratio)
     # Budget is per call: a shared ``outcome`` accumulates across several
     # ladders (one per resolution), and its running total must not starve them.
     spent = 0
@@ -141,6 +144,7 @@ def search_proportional(
     max_evaluations: int = 6,
     good_enough_ratio: float = 0.88,
     aim_ratio: float = 0.97,
+    floor: int | None = None,
     outcome: SearchOutcome[int] | None = None,
 ) -> SearchOutcome[int]:
     """Search a bitrate-like knob where size is roughly linear in the setting.
@@ -162,8 +166,11 @@ def search_proportional(
         maximum: never exceed this (e.g. the source bitrate).
         fixed_overhead_bytes: part of the output that does not scale.
         max_evaluations: encode budget.
-        good_enough_ratio: stop once a result lands in ``[ratio * limit, limit)``.
+        good_enough_ratio: used when no explicit ``floor`` is given; stop once a
+            result lands in ``[ratio * limit, limit)``.
         aim_ratio: aim for this fraction of the limit, leaving a safety margin.
+        floor: explicit lower bound in bytes, from a user-supplied size range.
+            The search keeps raising the bitrate until a result reaches it.
         outcome: reuse an existing outcome to keep a global best.
     """
     result = outcome if outcome is not None else SearchOutcome()
@@ -171,7 +178,10 @@ def search_proportional(
         return result
 
     aim_bytes = max(int(limit * aim_ratio), 1)
-    good_enough = int(limit * good_enough_ratio)
+    good_enough = floor if floor is not None else int(limit * good_enough_ratio)
+    if floor is not None and aim_bytes <= floor:
+        # A tight window (say 49-50 MB) would otherwise aim below its own floor.
+        aim_bytes = min((floor + limit) // 2, limit - 1)
     current = max(minimum, min(initial, maximum))
     tried: list[int] = []
     # Upper bound known to be too large; keeps the search from oscillating.

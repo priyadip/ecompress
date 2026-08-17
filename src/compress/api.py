@@ -36,7 +36,7 @@ from compress.errors import (
 from compress.naming import ReservedPath, reserve_output_path
 from compress.reporting import NullReporter, Reporter
 from compress.result import CompressionResult, MediaType
-from compress.units import format_size, mb_to_bytes
+from compress.units import SizeRange, format_size, parse_size_range
 from compress.validation import validate_output
 
 __all__ = ["compress"]
@@ -56,8 +56,9 @@ _BACKENDS = {
 
 def compress(
     path: str | Path,
-    target_mb: int | float | str,
+    target_mb: int | float | str | tuple[float, float] | list[float],
     *,
+    min_mb: int | float | str | None = None,
     output_path: str | Path | None = None,
     reporter: Reporter | None = None,
     overwrite: bool = False,
@@ -68,7 +69,15 @@ def compress(
     Args:
         path: the file to compress. It is never modified or overwritten.
         target_mb: the maximum size of the output in decimal megabytes
-            (``1 MB == 1_000_000 bytes``). Fractional values are allowed.
+            (``1 MB == 1_000_000 bytes``). Fractional values are allowed. A
+            range may be given instead - ``"40-50"``, ``"[40,50]"`` or
+            ``(40, 50)`` - meaning "below 50 MB but not below 40 MB".
+        min_mb: a quality floor, as an alternative to passing a range. The
+            search keeps raising quality until the output reaches it, so the
+            budget is used rather than undershot. It is a goal, not a hard
+            constraint: when even maximum quality lands below it (the source
+            is simply small, and inflating it would add bytes without adding
+            quality) the result is still returned, with an explanatory note.
         output_path: write here instead of the automatic
             ``<name>_compressed<ext>`` next to the input.
         reporter: receives progress events; defaults to silence.
@@ -91,29 +100,43 @@ def compress(
     """
     reporter = reporter or NullReporter()
     input_path = _validate_input(path)
-    target_bytes = _validate_target(target_mb)
+    size_range = _validate_target(target_mb, min_mb)
+    target_bytes = size_range.maximum
     input_size = input_path.stat().st_size
 
     reporter.step(f"Original size: {format_size(input_size)}")
-    reporter.step(f"Target size:   {format_size(target_bytes)}")
+    if size_range.minimum is None:
+        reporter.step(f"Target size:   {format_size(target_bytes)}")
+    else:
+        reporter.step(
+            f"Target size:   {format_size(size_range.minimum)} to {format_size(target_bytes)}"
+        )
     reporter.step("")
 
     # Check the file type before the shortcut below, so an unsupported file is
     # rejected rather than being waved through as "already small enough".
     # ``allow_probe=False`` keeps this step free of any FFmpeg dependency.
     if input_size < target_bytes:
+        notes = ["The file is already below the requested target; it was left untouched."]
+        if size_range.minimum is not None and input_size < size_range.minimum:
+            notes.append(
+                f"It is also below the {format_size(size_range.minimum)} minimum. "
+                "Padding it out would add bytes without adding quality, so it was "
+                "left as it is."
+            )
         return CompressionResult(
             input_path=input_path,
             output_path=input_path,
             input_size_bytes=input_size,
             output_size_bytes=input_size,
             target_size_bytes=target_bytes,
+            min_size_bytes=size_range.minimum,
             media_type=detect_media_type(input_path, allow_probe=False).media_type,
             attempts=[],
             target_achieved=True,
             skipped=True,
             backend="none",
-            notes=["The file is already below the requested target; it was left untouched."],
+            notes=notes,
         )
 
     reporter.step("Detecting media type...")
@@ -135,6 +158,7 @@ def compress(
             workdir=workdir,
             reporter=reporter,
             timeout=timeout,
+            min_bytes=size_range.minimum,
         )
         outcome = backend.compress(job)
 
@@ -156,19 +180,28 @@ def compress(
             target_bytes=target_bytes,
             media_type=detection.media_type,
         )
+        final_size = final.stat().st_size
+        notes = list(outcome.notes)
+        if size_range.minimum is not None and final_size < size_range.minimum:
+            notes.append(
+                f"The result came out below the {format_size(size_range.minimum)} "
+                "minimum: this is the largest valid output the source and format "
+                "can produce, and padding it would add bytes without adding quality."
+            )
         return CompressionResult(
             input_path=input_path,
             output_path=final,
             input_size_bytes=input_size,
-            output_size_bytes=final.stat().st_size,
+            output_size_bytes=final_size,
             target_size_bytes=target_bytes,
+            min_size_bytes=size_range.minimum,
             media_type=detection.media_type,
             attempts=list(outcome.attempts),
             target_achieved=True,
             skipped=False,
             format_changed=outcome.format_changed,
             backend=backend.name,
-            notes=list(outcome.notes),
+            notes=notes,
         )
     finally:
         shutil.rmtree(cleanup_root, ignore_errors=True)
@@ -218,15 +251,17 @@ def _validate_input(path: str | Path) -> Path:
     return candidate
 
 
-def _validate_target(target_mb: int | float | str) -> int:
-    if isinstance(target_mb, bool):  # bool is an int subclass; reject it explicitly
+def _validate_target(target_mb: object, min_mb: object = None) -> SizeRange:
+    # bool is an int subclass; reject it explicitly.
+    if isinstance(target_mb, bool) or isinstance(min_mb, bool):
         raise InvalidTargetError("The target size must be a number of megabytes, e.g. 50.")
     try:
-        return mb_to_bytes(target_mb)
+        return parse_size_range(target_mb, minimum=min_mb)  # type: ignore[arg-type]
     except ValueError as exc:
         raise InvalidTargetError(
-            f"{exc}\n\nGive the target as a number of megabytes, for example:  compress "
-            '"video.mp4" 50'
+            f"{exc}\n\nGive the target as a number of megabytes, for example:\n"
+            '  compress "video.mp4" 50        below 50 MB\n'
+            '  compress "video.mp4" 40-50     below 50 MB but not under 40 MB'
         ) from exc
 
 

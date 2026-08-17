@@ -5,6 +5,45 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] - 2026-08-17
+
+### Added
+
+- **Size ranges.** `compress "movie.mp4" 40-50` sets a floor as well as a
+  ceiling, so the budget gets used instead of undershot. `[40,50]`, `40..50`,
+  `40,50` and `--min 40` are all accepted, as are `(40, 50)` and `min_mb=` from
+  Python. The maximum stays a hard limit; the minimum is a quality floor that
+  the search climbs towards. When a file genuinely cannot reach the floor — a
+  small source, or a format with nothing left to give — the result is still
+  returned with an explanatory note. Files are never padded to hit a number.
+- `CompressionResult.min_size_bytes`, `.min_size_mb` and
+  `.within_requested_range`, plus the same fields in `--json` output.
+
+### Changed
+
+- **Video now trades frame rate and resolution together.** Previously only
+  resolution was reduced, which starved high-frame-rate sources: a 5-minute 4K
+  62 fps clip targeting 50 MB fell all the way to 640x360 while keeping all 62
+  frames per second. The cost of each (resolution, frame rate) combination is
+  now modelled on published streaming ladders — doubling frame rate costs about
+  1.5x the bitrate, not 2x — every affordable combination is ranked with
+  resolution weighted above frame rate, and the best is encoded. The same clip
+  now produces 1024x576 at 31 fps: 2.6x the pixels per frame.
+
+  Frame rate is never raised, never reduced below 24 fps, and left untouched
+  when the budget comfortably covers the source. Duration is unchanged, and the
+  existing validation still verifies it on every candidate.
+- The resolution ladder gained intermediate tiers (432, 288, 240, 216). Gaps in
+  it made the search fall further than necessary when no tier in between was
+  affordable.
+
+### Notes
+
+- `compress.quality` is a new module holding the bitrate cost model and the
+  ranking, so the heuristics are testable in isolation and documented in one
+  place. Both constants are tuned to established encoding practice rather than
+  measured per clip; unusual footage will not match them exactly.
+
 ## [1.2.0] - 2026-08-17
 
 **No functional changes.** Everything under `src/compress/` is byte-identical
@@ -111,5 +150,6 @@ Never published to PyPI; superseded by 1.1.0 before release. Requires Python
 - Scratch files are created in a private per-run directory with
   `tempfile.mkdtemp`.
 
+[1.3.0]: https://github.com/priyadip/compress-cli/releases/tag/v1.3.0
 [1.2.0]: https://github.com/priyadip/compress-cli/releases/tag/v1.2.0
 [1.1.0]: https://github.com/priyadip/compress-cli/releases/tag/v1.1.0

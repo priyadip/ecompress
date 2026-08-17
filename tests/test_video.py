@@ -82,7 +82,9 @@ def test_hd_video_downscales_when_the_budget_is_thin(
     video = info.primary_video
     assert video is not None
     assert (video.width or 0) < 1280, "a 50 KB budget cannot carry 720p"
-    assert any("resolution" in note.lower() or "scaling" in note.lower() for note in result.notes)
+    assert any("not enough for" in note or "Stepping down" in note for note in result.notes), (
+        f"the downscale should have been explained: {result.notes}"
+    )
 
 
 def test_mkv_stays_mkv(copy_media: Copier, source_mkv: Path) -> None:
@@ -120,6 +122,62 @@ def test_webm_stays_webm(tmp_path: Path, source_mp4_silent: Path) -> None:
     info = probe(result.output_path)
     assert info.has_video
     assert (info.primary_video.codec_name if info.primary_video else "") == "vp9"
+
+
+def test_high_fps_video_trades_frame_rate_for_resolution(
+    copy_media: Copier, source_mp4_high_fps: Path
+) -> None:
+    """A 60 fps source on a thin budget should lose frames, not just pixels."""
+    source = copy_media(source_mp4_high_fps)
+    result = compress(source, 0.1)
+
+    assert result.output_size_bytes < 100_000
+
+    info = probe(result.output_path)
+    video = info.primary_video
+    assert video is not None
+    assert video.frame_rate is not None
+    assert video.frame_rate < 55, "frame rate should have been reduced"
+    assert any("fps" in note for note in result.notes)
+
+
+def test_reducing_frame_rate_preserves_duration(
+    copy_media: Copier, source_mp4_high_fps: Path
+) -> None:
+    """Dropping frames must not shorten the clip."""
+    source = copy_media(source_mp4_high_fps)
+    original = probe(source).duration
+    assert original is not None
+
+    result = compress(source, 0.1)
+
+    compressed = probe(result.output_path).duration
+    assert compressed is not None
+    assert abs(compressed - original) < 0.5
+
+
+def test_frame_rate_is_kept_when_the_budget_allows(
+    copy_media: Copier, source_mp4_high_fps: Path
+) -> None:
+    """No gratuitous frame-rate loss on a comfortable budget."""
+    source = copy_media(source_mp4_high_fps)
+    result = compress(source, source.stat().st_size * 0.9 / 1_000_000)
+
+    info = probe(result.output_path)
+    video = info.primary_video
+    assert video is not None
+    assert video.frame_rate is not None
+    assert video.frame_rate > 55, "frame rate was reduced for no reason"
+
+
+def test_video_respects_a_size_range(copy_media: Copier, source_mp4: Path) -> None:
+    source = copy_media(source_mp4)
+    result = compress(source, "0.40-0.50")
+
+    assert result.output_size_bytes < 500_000
+    assert result.output_size_bytes >= 400_000
+    assert result.within_requested_range
+    assert probe(result.output_path).has_video
 
 
 def test_impossible_video_target_raises_with_the_best_achieved(

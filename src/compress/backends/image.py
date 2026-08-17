@@ -117,6 +117,7 @@ class ImageBackend(Backend):
                 encode,
                 limit=job.target_bytes,
                 max_evaluations=MAX_ATTEMPTS_PER_LADDER,
+                floor=job.min_bytes,
                 outcome=outcome,
             )
             if frame is not source:
@@ -192,6 +193,7 @@ class ImageBackend(Backend):
             encode,
             limit=job.target_bytes,
             max_evaluations=6,
+            floor=job.min_bytes,
             outcome=outcome,
         )
         if base is not source:

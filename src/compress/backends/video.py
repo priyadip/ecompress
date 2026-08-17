@@ -25,12 +25,13 @@ from compress.backends.base import Backend, Job
 from compress.errors import ToolExecutionError
 from compress.ffmpeg import MediaInfo, first_available_encoder, probe, require_ffmpeg
 from compress.process import run_command
+from compress.quality import VideoPlan, build_plan_ladder
 from compress.result import MediaType
 from compress.search import SearchOutcome, search_discrete_ladder, search_proportional
 
 __all__ = ["VideoBackend"]
 
-#: Encode budget across every resolution step.
+#: Encode budget across every step of the resolution / frame-rate ladder.
 MAX_ENCODES = 7
 
 #: Below this the picture stops being watchable at any resolution.
@@ -38,12 +39,6 @@ MIN_VIDEO_BITRATE = 24_000
 
 #: Fraction of the byte budget reserved for container overhead (indexes, moov).
 CONTAINER_OVERHEAD = 0.015
-
-#: Standard heights to step down through, descending.
-HEIGHT_LADDER: tuple[int, ...] = (2160, 1440, 1080, 900, 720, 540, 480, 360, 270, 180, 144)
-
-#: Bits per pixel per frame that still looks acceptable for H.264 at `medium`.
-ACCEPTABLE_BPP = 0.05
 
 #: CRF ladder used only when the duration is unknown and bitrate maths is impossible.
 CRF_LADDER: tuple[int, ...] = (51, 48, 45, 42, 39, 36, 33, 30, 28, 26, 24, 22)
@@ -212,27 +207,31 @@ class VideoBackend(Backend):
         source_bps = _source_video_bitrate(info)
         maximum_bps = min(source_bps, initial_bps * 4) if source_bps else initial_bps * 4
 
-        ladder = _resolution_ladder(width, height)
-        start = _choose_resolution_index(ladder, fps, initial_bps)
-        if start > 0:
-            target_w, target_h = ladder[start]
+        # Resolution and frame rate are chosen together: for a thin budget,
+        # giving up frames is usually cheaper than giving up pixels.
+        ladder = build_plan_ladder(
+            width=width, height=height, source_fps=fps, video_bitrate=initial_bps
+        )
+        first = ladder[0]
+        if (first.width, first.height) != (width, height) or first.changes_frame_rate:
             self.note(
-                f"Scaling down to {target_w}x{target_h}: "
-                f"{_kbps(initial_bps)} is not enough for {width}x{height}."
+                f"{_kbps(initial_bps)} is not enough for {width}x{height} at "
+                f"{fps:g} fps; using {first.describe()} instead."
             )
 
         outcome: SearchOutcome[int] = SearchOutcome()
         used = 0
-        for index in range(start, len(ladder)):
+        for index, video_plan in enumerate(ladder):
             remaining = MAX_ENCODES - used
             if remaining <= 0:
                 break
-            dims = ladder[index]
-            if index > start:
-                self.note(f"Reduced resolution to {dims[0]}x{dims[1]} to reach the target.")
+            if index > 0:
+                self.note(f"Stepping down to {video_plan.describe()} to reach the target.")
 
-            def encode(bitrate: int, dims: tuple[int, int] = dims) -> int | None:
-                return self._encode(job, plan, bitrate=bitrate, audio_bps=audio_bps, dims=dims)
+            def encode(bitrate: int, video_plan: VideoPlan = video_plan) -> int | None:
+                return self._encode(
+                    job, plan, bitrate=bitrate, audio_bps=audio_bps, video_plan=video_plan
+                )
 
             before = outcome.evaluations
             search_proportional(
@@ -243,6 +242,7 @@ class VideoBackend(Backend):
                 maximum=max(maximum_bps, MIN_VIDEO_BITRATE),
                 fixed_overhead_bytes=fixed_bytes,
                 max_evaluations=remaining,
+                floor=job.min_bytes,
                 outcome=outcome,
             )
             used += outcome.evaluations - before
@@ -250,8 +250,9 @@ class VideoBackend(Backend):
                 return
 
         if not self._outcome.achieved:
+            smallest = ladder[-1]
             self._outcome.detail = (
-                f"Even at {ladder[-1][0]}x{ladder[-1][1]} and the minimum usable "
+                f"Even at {smallest.describe()} and the minimum usable "
                 f"bitrate ({_kbps(MIN_VIDEO_BITRATE)} video"
                 + (f" + {_kbps(audio_bps)} audio" if audio_bps else "")
                 + f"), a {duration:.1f}s clip cannot fit in the requested size."
@@ -259,16 +260,17 @@ class VideoBackend(Backend):
 
     def _crf_search(self, job: Job, plan: _Plan, width: int, height: int) -> None:
         """Quality-based fallback for sources with no readable duration."""
-        dims = (width, height) if width and height else None
+        video_plan = VideoPlan(width, height, 0.0) if width and height else None
 
         def encode(crf: int) -> int | None:
-            return self._encode(job, plan, crf=crf, audio_bps=96_000, dims=dims)
+            return self._encode(job, plan, crf=crf, audio_bps=96_000, video_plan=video_plan)
 
         search_discrete_ladder(
             CRF_LADDER,
             encode,
             limit=job.target_bytes,
             max_evaluations=MAX_ENCODES,
+            floor=job.min_bytes,
         )
         if not self._outcome.achieved:
             self._outcome.detail = (
@@ -285,11 +287,13 @@ class VideoBackend(Backend):
         audio_bps: int,
         bitrate: int | None = None,
         crf: int | None = None,
-        dims: tuple[int, int] | None = None,
+        video_plan: VideoPlan | None = None,
     ) -> int | None:
         tag = f"b{bitrate}" if bitrate is not None else f"crf{crf}"
-        if dims:
-            tag += f"_{dims[0]}x{dims[1]}"
+        if video_plan:
+            tag += f"_{video_plan.width}x{video_plan.height}"
+            if video_plan.changes_frame_rate:
+                tag += f"_{video_plan.fps:g}fps"
         out = job.scratch(f"v_{tag}{plan.container_ext}")
         if out.exists():
             out.unlink()
@@ -327,8 +331,13 @@ class VideoBackend(Backend):
         else:
             args += ["-crf", str(crf)]
 
-        if dims:
-            args += ["-vf", f"scale={dims[0]}:{dims[1]}:flags=lanczos"]
+        if video_plan and video_plan.width > 0:
+            # Drop frames before scaling: fewer frames to resample.
+            filters = []
+            if video_plan.changes_frame_rate:
+                filters.append(f"fps={video_plan.fps:g}")
+            filters.append(f"scale={video_plan.width}:{video_plan.height}:flags=lanczos")
+            args += ["-vf", ",".join(filters)]
         args += ["-pix_fmt", "yuv420p"]
 
         if plan.audio_codec:
@@ -347,16 +356,17 @@ class VideoBackend(Backend):
             return None
 
         label = _kbps(bitrate) if bitrate is not None else f"crf {crf}"
-        if dims:
-            label += f" @ {dims[0]}x{dims[1]}"
+        if video_plan and video_plan.width > 0:
+            label += f" @ {video_plan.describe()}"
         return self.measure(
             out,
             parameters={
                 "video_bitrate": bitrate,
                 "crf": crf,
                 "audio_bitrate": audio_bps or None,
-                "width": dims[0] if dims else None,
-                "height": dims[1] if dims else None,
+                "width": video_plan.width if video_plan else None,
+                "height": video_plan.height if video_plan else None,
+                "fps": video_plan.fps if video_plan and video_plan.changes_frame_rate else None,
             },
             label=label,
             keep_as=f"best{plan.container_ext}",
@@ -374,36 +384,6 @@ def _source_video_bitrate(info: MediaInfo) -> int | None:
         if remainder > 0:
             return remainder
     return None
-
-
-def _even(value: int) -> int:
-    """H.264 and VP9 need even dimensions for 4:2:0 chroma."""
-    return max(2, value - (value % 2))
-
-
-def _resolution_ladder(width: int, height: int) -> list[tuple[int, int]]:
-    """Source resolution first, then progressively smaller standard heights."""
-    if width <= 0 or height <= 0:
-        return [(0, 0)]
-    aspect = width / height
-    ladder: list[tuple[int, int]] = [(_even(width), _even(height))]
-    for target_h in HEIGHT_LADDER:
-        if target_h >= height:
-            continue
-        ladder.append((_even(round(target_h * aspect)), _even(target_h)))
-    return ladder
-
-
-def _choose_resolution_index(ladder: Sequence[tuple[int, int]], fps: float, video_bps: int) -> int:
-    """Largest resolution whose bits-per-pixel stays watchable at this bitrate."""
-    rate = fps if fps and fps > 0 else 30.0
-    for index, (width, height) in enumerate(ladder):
-        if width <= 0 or height <= 0:
-            return index
-        bpp = video_bps / (width * height * rate)
-        if bpp >= ACCEPTABLE_BPP:
-            return index
-    return len(ladder) - 1
 
 
 def _kbps(bits_per_second: int) -> str:

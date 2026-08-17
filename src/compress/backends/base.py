@@ -29,6 +29,8 @@ class Job:
     """Private scratch directory; the backend writes all candidates here."""
     reporter: Reporter
     timeout: float | None = None
+    min_bytes: int | None = None
+    """Quality floor from a user-supplied size range; ``None`` means no floor."""
 
     @property
     def media_type(self) -> MediaType:

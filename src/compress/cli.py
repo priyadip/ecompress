@@ -29,7 +29,7 @@ from compress.errors import (
 )
 from compress.reporting import ConsoleReporter
 from compress.result import CompressionResult
-from compress.units import format_size
+from compress.units import format_size, parse_size_range
 
 __all__ = ["build_parser", "main"]
 
@@ -42,9 +42,13 @@ EXIT_INTERRUPTED = 130
 _EPILOG = """\
 examples:
   compress "D:\\Videos\\movie.mp4" 50        compress a video below 50 MB
+  compress "movie.mp4" 40-50                below 50 MB, but not under 40 MB
   compress "photo.jpg" 2                    compress an image below 2 MB
   compress "song.wav" 10                    compress audio below 10 MB
   compress "report.pdf" 5                   compress a PDF below 5 MB
+
+A range keeps quality up by using the budget instead of undershooting it.
+40-50, [40,50], 40..50 and --min 40 all mean the same thing.
 
 The output is written next to the original as <name>_compressed<ext>.
 The original file is never modified. 1 MB = 1,000,000 bytes.
@@ -64,7 +68,19 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "target_mb",
         nargs="?",
-        help="maximum size of the result, in MB (1 MB = 1,000,000 bytes)",
+        metavar="TARGET_MB",
+        help=(
+            "maximum size of the result, in MB (1 MB = 1,000,000 bytes). "
+            "A range like 40-50 also sets a minimum, so the budget is used "
+            "rather than undershot"
+        ),
+    )
+    parser.add_argument(
+        "--min",
+        dest="min_mb",
+        metavar="MB",
+        default=None,
+        help="minimum size, as an alternative to the 40-50 range form",
     )
     parser.add_argument(
         "--check",
@@ -114,7 +130,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
 
     verbose = not (args.quiet or args.json)
-    target = _parse_target(args.target_mb, parser)
+    _validate_target_syntax(args.target_mb, args.min_mb, parser)
 
     if verbose:
         out.write(f"Compressing:\n{Path(args.path).expanduser()}\n\n")
@@ -125,7 +141,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         result = compress_file(
             args.path,
-            target,
+            args.target_mb,
+            min_mb=args.min_mb,
             output_path=args.output,
             reporter=reporter,
             overwrite=args.overwrite,
@@ -191,17 +208,17 @@ def _run_check(stream: IO[str], *, as_json: bool = False) -> int:
     return EXIT_OK if report.ok else EXIT_MISSING_DEPENDENCY
 
 
-def _parse_target(raw: str, parser: argparse.ArgumentParser) -> float:
+def _validate_target_syntax(raw: str, minimum: str | None, parser: argparse.ArgumentParser) -> None:
+    """Fail with a usage message rather than a traceback on a malformed size."""
     try:
-        value = float(raw)
-    except (TypeError, ValueError):
+        parse_size_range(raw, minimum=minimum)
+    except ValueError as exc:
         parser.error(
-            f"'{raw}' is not a size in MB.\n"
-            'Usage: compress "PATH" TARGET_MB   for example:  compress "video.mp4" 50'
+            f"{exc}\n"
+            'Usage: compress "PATH" TARGET_MB\n'
+            '  compress "video.mp4" 50        below 50 MB\n'
+            '  compress "video.mp4" 40-50     below 50 MB but not under 40 MB'
         )
-    if value <= 0 or value != value or value == float("inf"):
-        parser.error(f"the target size must be greater than 0 MB, got {raw}")
-    return value
 
 
 def _summary(result: CompressionResult) -> str:
@@ -230,6 +247,12 @@ def _summary(result: CompressionResult) -> str:
         f"Reduction:   {result.reduction_percent:.1f}%",
         "",
     ]
+    if result.min_size_bytes is not None and not result.within_requested_range:
+        lines += [
+            f"Below the requested {format_size(result.min_size_bytes)} minimum "
+            "(see the notes above).",
+            "",
+        ]
     if result.format_changed:
         lines += [
             f"Format changed to '{result.output_path.suffix}' (see the notes above for why).",

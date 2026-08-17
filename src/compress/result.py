@@ -55,6 +55,8 @@ class CompressionResult:
     output_size_bytes: int
     target_size_bytes: int
     media_type: MediaType
+    min_size_bytes: int | None = None
+    """Quality floor requested via a size range, if any."""
     attempts: list[Attempt] = field(default_factory=list)
     target_achieved: bool = True
     skipped: bool = False
@@ -92,6 +94,22 @@ class CompressionResult:
     def attempt_count(self) -> int:
         return len(self.attempts)
 
+    @property
+    def min_size_mb(self) -> float | None:
+        """The requested floor in MB, or ``None`` when no range was given."""
+        return None if self.min_size_bytes is None else bytes_to_mb(self.min_size_bytes)
+
+    @property
+    def within_requested_range(self) -> bool:
+        """Whether the result satisfies both ends of the requested window.
+
+        The ceiling always holds. This is ``False`` only when a floor was asked
+        for and the output legitimately could not reach it.
+        """
+        if self.output_size_bytes >= self.target_size_bytes and not self.skipped:
+            return False
+        return self.min_size_bytes is None or self.output_size_bytes >= self.min_size_bytes
+
     def to_dict(self) -> dict[str, Any]:
         """A JSON-serialisable view, used by ``compress --json``."""
         return {
@@ -100,6 +118,8 @@ class CompressionResult:
             "input_size_bytes": self.input_size_bytes,
             "output_size_bytes": self.output_size_bytes,
             "target_size_bytes": self.target_size_bytes,
+            "min_size_bytes": self.min_size_bytes,
+            "within_requested_range": self.within_requested_range,
             "input_size_mb": round(self.input_size_mb, 6),
             "output_size_mb": round(self.output_size_mb, 6),
             "target_size_mb": round(self.target_size_mb, 6),

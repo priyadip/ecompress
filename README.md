@@ -56,7 +56,7 @@ compress --check
 ```
 
 ```text
-compress 1.2.0
+compress 1.3.0
 Python 3.12.10 on Windows 11 (AMD64)
 
 Video and audio (FFmpeg)
@@ -168,6 +168,31 @@ compress "scan.pdf" 1.5
 
 Fractional targets work: `0.5`, `1.5`, `49.9` are all valid.
 
+## Setting a minimum too
+
+A bare ceiling lets the result land anywhere below it. Give a **range** and the
+budget gets used instead of undershot:
+
+```bash
+compress "movie.mp4" 40-50     # below 50 MB, but not under 40 MB
+```
+
+`40-50`, `[40,50]`, `40..50` and `--min 40` all mean the same thing.
+
+The two ends behave differently, deliberately:
+
+- **The maximum is a hard limit.** The result is always strictly below it.
+- **The minimum is a quality floor.** The search keeps raising quality until it
+  reaches it — that is the point, since a bigger file at the same settings means
+  fewer artefacts.
+
+If a file genuinely cannot reach the floor — the source is already small, or the
+format has nothing left to give — you get the result anyway, with a note saying
+why. **Padding a file with junk to hit a number is never done**, because those
+bytes would add size without adding quality.
+
+`result.within_requested_range` tells you whether both ends were satisfied.
+
 ## Where the output goes
 
 Next to the original, with `_compressed` before the extension:
@@ -246,8 +271,8 @@ Not "make it as small as possible" — a 50 MB request should come back at
   only then downscaling.
 - **Video** — the byte budget is split into audio + container overhead + video,
   an opening bitrate is derived from the duration, and each measurement
-  corrects the next guess proportionally. Resolution steps down only when the
-  bitrate is too thin for the frame size.
+  corrects the next guess proportionally. Resolution and frame rate are then
+  chosen **together** (see below).
 - **Audio** — lossless FLAC first for lossless sources. Otherwise the source's
   own codec at a searched bitrate, dropping to mono, then to a lower sample
   rate, then to Opus.
@@ -257,6 +282,39 @@ Not "make it as small as possible" — a 50 MB request should come back at
 
 Encodes are budgeted (six to eight per run), so a run converges instead of
 grinding through dozens of attempts.
+
+### Resolution and frame rate are traded together
+
+When a video budget is too thin for the source, there are two things to give
+up: pixels per frame, and frames per second. Sacrificing only resolution — the
+obvious approach — throws away detail that a small frame-rate cut would have
+paid for.
+
+A 5-minute 4K clip at 62 fps squeezed into 50 MB is the worst case: those bits
+have to cover twice as many frames as a 30 fps video, starving every one of
+them.
+
+| | Resolution only | Both levers |
+| --- | --- | --- |
+| Result | 640x360 @ 62 fps | **1024x576 @ 31 fps** |
+| Pixels per frame | 230,400 | **589,824** (2.6x) |
+
+The cost of a combination follows published streaming ladders, where doubling
+frame rate costs about **1.5x** the bitrate rather than 2x — consecutive frames
+are more alike the faster you sample:
+
+```text
+required_bitrate = 1.5 * width * height * (fps / 30) ** 0.585
+```
+
+Every affordable combination is then ranked, weighting resolution above frame
+rate, and the best one is encoded. Frame rate is never reduced below 24 fps,
+never raised, and never touched at all when the budget comfortably covers the
+source.
+
+Both constants are heuristics tuned to established practice, not measurements
+of your specific clip — very high-motion footage or a slideshow will not match
+them exactly.
 
 ## Python API
 
@@ -278,7 +336,9 @@ assert result.output_size_bytes < 50_000_000
 | `output_path`        | absolute path of the result                        |
 | `input_size_bytes`   | original size                                      |
 | `output_size_bytes`  | measured size of the result                        |
-| `target_size_bytes`  | `target_mb * 1_000_000`                            |
+| `target_size_bytes`  | the ceiling, `target_mb * 1_000_000`               |
+| `min_size_bytes`     | the floor, when a range was given, else `None`     |
+| `within_requested_range` | whether both ends were satisfied               |
 | `saved_bytes`        | bytes removed                                      |
 | `reduction_percent`  | percentage removed                                 |
 | `media_type`         | `MediaType.VIDEO`, `.IMAGE`, `.AUDIO` or `.PDF`    |
@@ -293,7 +353,8 @@ Optional keyword arguments:
 ```python
 compress(
     path,
-    target_mb,
+    target_mb,  # 50, "50", "40-50", (40, 50)
+    min_mb=None,  # a floor, as an alternative to the range form
     output_path=None,  # write somewhere specific
     reporter=None,  # progress callbacks; ConsoleReporter() prints them
     overwrite=False,  # allow output_path to replace an existing file

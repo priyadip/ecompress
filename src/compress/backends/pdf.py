@@ -128,6 +128,7 @@ class PdfBackend(Backend):
             encode,
             limit=job.target_bytes,
             max_evaluations=MAX_ATTEMPTS,
+            floor=job.min_bytes,
             outcome=outcome,
         )
         if self._outcome.achieved:
@@ -235,6 +236,7 @@ class PdfBackend(Backend):
             encode,
             limit=job.target_bytes,
             max_evaluations=max_evaluations,
+            floor=job.min_bytes,
         )
         return self._outcome.best_path is not None
 
