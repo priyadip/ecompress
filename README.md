@@ -68,7 +68,7 @@ ecompress --check
 ```
 
 ```text
-ecompress 2.2.0
+ecompress 2.3.0
 Python 3.12.10 on Windows 11 (AMD64)
 
 Video and audio (FFmpeg)
@@ -294,6 +294,14 @@ Not "make it as small as possible" — a 50 MB request should come back at
 
 Encodes are budgeted (six to eight per run), so a run converges instead of
 grinding through dozens of attempts.
+
+**Long videos are searched on a sample.** A single full pass over a long 4K
+source runs well below realtime, so searching with full passes is painfully
+slow. Above 90 seconds the search runs on a 30-second slice taken a quarter of
+the way in, and only the settings that win get a full-length encode. The
+prediction is never the result: the full encode is measured and validated like
+any other, and corrected if the sample misjudged the file. The delivered file
+is a full-quality encode either way.
 
 ### Resolution and frame rate are traded together
 

@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from pathlib import Path
+from typing import NamedTuple
 
 from ecompress.backends.base import Backend, Job
 from ecompress.errors import ToolExecutionError
@@ -54,6 +55,38 @@ CRF_LADDER: tuple[int, ...] = (51, 48, 45, 42, 39, 36, 33, 30, 28, 26, 24, 22, 2
 
 #: Extra encodes allowed for the CRF fill, on top of the bitrate search.
 CRF_FILL_ENCODES = 4
+
+#: Searching means several encodes, and on a long source each one is expensive:
+#: at 4K a full pass runs at a fraction of realtime. Above this duration the
+#: search runs on a slice instead, and only the settings that win get a
+#: full-length encode.
+SAMPLE_TRIGGER_SECONDS = 90.0
+SAMPLE_SECONDS = 30.0
+
+#: Start a quarter of the way in: titles, fades and black frames at the very
+#: beginning are not representative of the whole.
+SAMPLE_START_FRACTION = 0.25
+
+#: Full-length encodes allowed to correct a sample that misjudged the file.
+FINAL_CORRECTIONS = 2
+
+
+class _Sample(NamedTuple):
+    """A slice of the source used to predict full-length sizes."""
+
+    start: float
+    length: float
+    scale: float
+    """Multiply a slice's size by this to estimate the whole file."""
+
+
+class _Settings(NamedTuple):
+    """What the search converged on."""
+
+    video_plan: VideoPlan
+    bitrate: int | None = None
+    crf: int | None = None
+
 
 _H264_ENCODERS = ["libx264", "h264_mf", "libopenh264", "mpeg4"]
 _VP9_ENCODERS = ["libvpx-vp9", "libvpx"]
@@ -239,7 +272,13 @@ class VideoBackend(Backend):
                 f"{_fps(fps)}; using {first.describe()} instead."
             )
 
-        outcome: SearchOutcome[int] = SearchOutcome()
+        sample = self._choose_sample(duration)
+        if sample is not None:
+            self.note(
+                f"Searching on a {sample.length:g}s sample, then encoding the whole "
+                f"file once at whatever wins."
+            )
+
         used = 0
         visited: set[int] = set()
         # Once the encoder has proved it cannot spend the budget at one frame
@@ -247,6 +286,13 @@ class VideoBackend(Backend):
         # easy. Further steps then need one measurement each, not a bitrate
         # hunt, which is what makes climbing several rungs affordable.
         saturated = False
+        # Carried across rungs: a bitrate proven to work at one frame size is a
+        # far better opening guess for the next than the original estimate.
+        # Resetting to `initial_bps` each time threw that away and made higher
+        # resolutions come out *smaller* than the rung below them.
+        opening_bps = initial_bps
+        winner: _Settings | None = None
+        best_overall = 0
 
         while 0 <= index < len(ladder) and index not in visited:
             remaining = MAX_ENCODES - used
@@ -256,42 +302,45 @@ class VideoBackend(Backend):
             video_plan = ladder[index]
 
             def encode(bitrate: int, video_plan: VideoPlan = video_plan) -> int | None:
-                return self._encode(
-                    job, plan, bitrate=bitrate, audio_bps=audio_bps, video_plan=video_plan
-                )
+                return self._measure_candidate(
+                    job, plan, audio_bps=audio_bps, video_plan=video_plan,
+                    bitrate=bitrate, sample=sample,
+                )  # fmt: skip
 
-            before = outcome.evaluations
+            # A fresh outcome per rung, so the climb is judged on what *this*
+            # frame size achieved rather than on a stale global best.
+            rung: SearchOutcome[int] = SearchOutcome()
             search_proportional(
                 encode,
                 limit=job.target_bytes,
-                initial=initial_bps,
+                initial=opening_bps,
                 minimum=MIN_VIDEO_BITRATE,
                 maximum=max(maximum_bps, MIN_VIDEO_BITRATE),
                 fixed_overhead_bytes=fixed_bytes,
                 max_evaluations=1 if saturated else remaining,
                 floor=job.min_bytes,
-                outcome=outcome,
+                outcome=rung,
             )
-            spent = outcome.evaluations - before
-            used += spent
+            used += rung.evaluations
 
-            if outcome.best is None:
-                # Too big even at the lowest usable bitrate: step down.
+            if rung.best is None:
                 index += 1
                 if index < len(ladder):
                     self.note(f"Stepping down to {ladder[index].describe()} to fit.")
                 continue
 
-            best_size = outcome.best.size_bytes
-            if job.min_bytes is None or best_size >= job.min_bytes:
-                return
+            rung_size = rung.best.size_bytes
+            opening_bps = max(min(rung.best.setting, maximum_bps), MIN_VIDEO_BITRATE)
+            if rung_size > best_overall:
+                best_overall = rung_size
+                winner = _Settings(video_plan, bitrate=rung.best.setting)
 
-            # Under the floor despite the bitrate search having had room to
-            # raise it: this content cannot absorb more bits at this frame
-            # size. Buy pixels instead, sized from what the encode actually
-            # cost, and stop re-hunting the bitrate on the way up.
-            if spent > 1:
-                saturated = True
+            if job.min_bytes is None or best_overall >= job.min_bytes:
+                break
+
+            if rung.evaluations > 1 and rung.smallest is not None:
+                grew = rung_size - rung.smallest.size_bytes
+                saturated = grew < int(rung_size * 0.05)
 
             climb: int | None
             if saturated and index > 0:
@@ -301,27 +350,26 @@ class VideoBackend(Backend):
                 climb = 0
             else:
                 climb = self._plan_above(
-                    ladder, index, video_plan, best_size, job.aim_bytes, fixed_bytes, fps
+                    ladder, index, video_plan, rung_size, job.aim_bytes, fixed_bytes, fps
                 )
             if climb is None:
                 break
             index = climb
             self.note(
-                f"{_size(best_size)} is under the requested minimum; "
+                f"{_size(rung_size)} is under the requested minimum; "
                 f"raising quality to {ladder[index].describe()}."
             )
 
         # Still short of the floor with nowhere left to climb. Average-bitrate
         # control will not emit bits this content does not call for; CRF fixes
         # a quality level instead, so lowering it always buys more.
-        best = outcome.best
-        if (
-            job.min_bytes is not None
-            and best is not None
-            and best.size_bytes < job.min_bytes
-            and 0 <= index < len(ladder)
-        ):
-            self._crf_fill(job, plan, ladder[index], audio_bps=audio_bps)
+        if job.min_bytes is not None and best_overall < job.min_bytes and 0 <= index < len(ladder):
+            filled = self._crf_fill(job, plan, ladder[index], audio_bps=audio_bps, sample=sample)
+            if filled is not None:
+                winner = filled
+
+        if sample is not None and winner is not None:
+            self._encode_full(job, plan, winner, audio_bps=audio_bps, fixed_bytes=fixed_bytes)
 
         if not self._outcome.achieved:
             smallest = ladder[-1]
@@ -332,7 +380,139 @@ class VideoBackend(Backend):
                 + f"), a {duration:.1f}s clip cannot fit in the requested size."
             )
 
-    def _crf_fill(self, job: Job, plan: _Plan, video_plan: VideoPlan, *, audio_bps: int) -> None:
+    @staticmethod
+    def _choose_sample(duration: float) -> _Sample | None:
+        """A slice to search on, or ``None`` when the file is short enough."""
+        if duration <= SAMPLE_TRIGGER_SECONDS:
+            return None
+        length = min(SAMPLE_SECONDS, duration / 3.0)
+        start = min(duration * SAMPLE_START_FRACTION, duration - length)
+        return _Sample(start=max(start, 0.0), length=length, scale=duration / length)
+
+    def _measure_candidate(
+        self,
+        job: Job,
+        plan: _Plan,
+        *,
+        audio_bps: int,
+        video_plan: VideoPlan,
+        bitrate: int | None = None,
+        crf: int | None = None,
+        sample: _Sample | None,
+    ) -> int | None:
+        """Size of this candidate: measured directly, or predicted from a slice."""
+        if sample is None:
+            return self._encode(
+                job, plan, bitrate=bitrate, crf=crf, audio_bps=audio_bps, video_plan=video_plan
+            )
+        return self._encode_sample(
+            job, plan, bitrate=bitrate, crf=crf, audio_bps=audio_bps,
+            video_plan=video_plan, sample=sample,
+        )  # fmt: skip
+
+    def _encode_sample(
+        self,
+        job: Job,
+        plan: _Plan,
+        *,
+        audio_bps: int,
+        video_plan: VideoPlan,
+        bitrate: int | None,
+        crf: int | None,
+        sample: _Sample,
+    ) -> int | None:
+        """Encode a slice and report what the whole file would weigh.
+
+        The slice is never a candidate output - it is the wrong length - so it
+        is deleted immediately and never reaches :meth:`measure`. Only the
+        prediction is returned.
+        """
+        out = job.scratch(f"probe{plan.container_ext}")
+        if out.exists():
+            out.unlink()
+
+        args = [str(self._ffmpeg), "-y", "-hide_banner", "-loglevel", "error", "-nostdin"]
+        args += ["-ss", f"{sample.start:.3f}", "-t", f"{sample.length:.3f}"]
+        args += ["-i", str(job.input_path)]
+        args += self._encode_options(plan, bitrate, crf, audio_bps, video_plan)
+        args.append(str(out))
+
+        try:
+            run_command(args, timeout=job.timeout, check=True, tool="ffmpeg")
+        except ToolExecutionError as exc:
+            job.reporter.note(f"encoder rejected these settings ({_first_line(exc.stderr)})")
+            return None
+
+        if not out.exists():  # pragma: no cover - defensive
+            return None
+        measured = out.stat().st_size
+        out.unlink()
+
+        estimated = int(measured * sample.scale)
+        label = _kbps(bitrate) if bitrate is not None else f"crf {crf}"
+        label += f" @ {video_plan.describe()}"
+        self.record_estimate(estimated, label=label)
+        return estimated
+
+    def _encode_full(
+        self,
+        job: Job,
+        plan: _Plan,
+        winner: _Settings,
+        *,
+        audio_bps: int,
+        fixed_bytes: int,
+    ) -> None:
+        """Encode the whole file at the winning settings and verify the result.
+
+        The sample only predicts; this is the measurement that counts. A slice
+        can misjudge a file whose busy and quiet halves differ, so an overshoot
+        is corrected here rather than being reported as a success.
+        """
+        self.note(f"Encoding the full file at {winner.video_plan.describe()}.")
+        bitrate, crf = winner.bitrate, winner.crf
+
+        for _ in range(FINAL_CORRECTIONS + 1):
+            size = self._encode(
+                job,
+                plan,
+                bitrate=bitrate,
+                crf=crf,
+                audio_bps=audio_bps,
+                video_plan=winner.video_plan,
+            )
+            if size is None or size < job.target_bytes:
+                return
+
+            # Over the ceiling: the sample was optimistic. Scale back from what
+            # the full encode actually cost.
+            self.note(
+                f"The full file came out at {_size(size)}; the sample under-read it. Correcting."
+            )
+            if bitrate is not None:
+                payload = max(size - fixed_bytes, 1)
+                desired = max(job.aim_bytes - fixed_bytes, 1)
+                scaled = int(bitrate * (desired / payload) * 0.95)
+                nxt = max(min(scaled, int(bitrate * 0.9)), MIN_VIDEO_BITRATE)
+                if nxt >= bitrate:
+                    return
+                bitrate = nxt
+            elif crf is not None:
+                if crf >= CRF_LADDER[0]:
+                    return
+                crf = min(crf + 4, CRF_LADDER[0])
+            else:  # pragma: no cover - one of the two is always set
+                return
+
+    def _crf_fill(
+        self,
+        job: Job,
+        plan: _Plan,
+        video_plan: VideoPlan,
+        *,
+        audio_bps: int,
+        sample: _Sample | None = None,
+    ) -> _Settings | None:
         """Reach a size floor that average-bitrate control cannot.
 
         ``-b:v`` asks for a mean bitrate, and libx264 will not pad a stream
@@ -347,15 +527,20 @@ class VideoBackend(Backend):
         )
 
         def encode(crf: int) -> int | None:
-            return self._encode(job, plan, crf=crf, audio_bps=audio_bps, video_plan=video_plan)
+            return self._measure_candidate(
+                job, plan, audio_bps=audio_bps, video_plan=video_plan, crf=crf, sample=sample
+            )
 
-        search_discrete_ladder(
+        outcome = search_discrete_ladder(
             CRF_LADDER,
             encode,
             limit=job.target_bytes,
             max_evaluations=CRF_FILL_ENCODES,
             floor=job.min_bytes,
         )
+        if outcome.best is None:
+            return None
+        return _Settings(video_plan, crf=outcome.best.setting)
 
     @staticmethod
     def _plan_above(
@@ -408,37 +593,20 @@ class VideoBackend(Backend):
 
     # -- encoding ----------------------------------------------------------
 
-    def _encode(
-        self,
-        job: Job,
+    @staticmethod
+    def _encode_options(
         plan: _Plan,
-        *,
+        bitrate: int | None,
+        crf: int | None,
         audio_bps: int,
-        bitrate: int | None = None,
-        crf: int | None = None,
-        video_plan: VideoPlan | None = None,
-    ) -> int | None:
-        tag = f"b{bitrate}" if bitrate is not None else f"crf{crf}"
-        if video_plan:
-            tag += f"_{video_plan.width}x{video_plan.height}"
-            if video_plan.changes_frame_rate:
-                tag += f"_{video_plan.fps:g}fps"
-        out = job.scratch(f"v_{tag}{plan.container_ext}")
-        if out.exists():
-            out.unlink()
+        video_plan: VideoPlan | None,
+    ) -> list[str]:
+        """Everything after ``-i``, shared by full encodes and sample probes.
 
-        args: list[str] = [
-            str(self._ffmpeg),
-            "-y",
-            "-hide_banner",
-            "-loglevel",
-            "error",
-            "-nostdin",
-            "-i",
-            str(job.input_path),
-            "-map",
-            "0:v:0",
-        ]
+        A sample must be encoded with exactly the settings the full file would
+        get, or its prediction means nothing.
+        """
+        args: list[str] = ["-map", "0:v:0"]
         if plan.audio_codec:
             args += ["-map", "0:a:0?"]
         args += ["-sn", "-dn", "-map_chapters", "-1"]
@@ -476,6 +644,38 @@ class VideoBackend(Backend):
 
         if plan.container_ext in {".mp4", ".m4v", ".mov"}:
             args += ["-movflags", "+faststart"]
+        return args
+
+    def _encode(
+        self,
+        job: Job,
+        plan: _Plan,
+        *,
+        audio_bps: int,
+        bitrate: int | None = None,
+        crf: int | None = None,
+        video_plan: VideoPlan | None = None,
+    ) -> int | None:
+        tag = f"b{bitrate}" if bitrate is not None else f"crf{crf}"
+        if video_plan:
+            tag += f"_{video_plan.width}x{video_plan.height}"
+            if video_plan.changes_frame_rate:
+                tag += f"_{video_plan.fps:g}fps"
+        out = job.scratch(f"v_{tag}{plan.container_ext}")
+        if out.exists():
+            out.unlink()
+
+        args: list[str] = [
+            str(self._ffmpeg),
+            "-y",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-nostdin",
+            "-i",
+            str(job.input_path),
+        ]
+        args += self._encode_options(plan, bitrate, crf, audio_bps, video_plan)
         args.append(str(out))
 
         try:

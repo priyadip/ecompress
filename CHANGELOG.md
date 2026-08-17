@@ -5,6 +5,42 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.0] - 2026-08-18
+
+### Fixed
+
+- **A bitrate proven to work is no longer thrown away when the resolution
+  changes.** Every rung of the ladder restarted its search from the original
+  opening estimate, so having learned that 3.13 Mbps worked at 1440p, the
+  search would drop back to 965 kbps on moving to 2160p — and the higher
+  resolution produced a *smaller* file than the rung below it:
+
+  ```text
+  Attempt 2: 21.0 MB [3.13 Mbps @ 2560x1440]   learned 3.13 Mbps works
+  Attempt 3: 16.2 MB [965 kbps  @ 3840x2160]   threw it away
+  ```
+
+  The learned rate now carries forward, so each climb makes the file larger,
+  monotonically, and the size floor is reached in fewer attempts.
+
+- The decision to climb is now judged on what the *current* frame size
+  achieved, rather than on a global best that may have come from a different
+  rung. The saturation test likewise compares results within one rung instead
+  of assuming any second encode means the encoder gave up.
+
+### Changed
+
+- **Long sources are searched on a 30-second sample.** Each search pass had to
+  encode the whole file, and on a long 4K source a single pass runs well below
+  realtime — a run needing five passes could take over an hour. Above 90
+  seconds the search now runs on a slice taken a quarter of the way in, and
+  only the settings that win get a full-length encode.
+
+  The prediction is never the result: the full encode is measured and validated
+  exactly as before, and if the sample misjudged the file the bitrate is
+  corrected and the encode repeated (up to twice). Quality is unaffected — the
+  delivered file is a full-quality encode either way.
+
 ## [2.2.0] - 2026-08-18
 
 ### Fixed
@@ -273,6 +309,7 @@ Never published to PyPI; superseded by 1.1.0 before release. Requires Python
 - Scratch files are created in a private per-run directory with
   `tempfile.mkdtemp`.
 
+[2.3.0]: https://github.com/priyadip/ecompress/releases/tag/v2.3.0
 [2.2.0]: https://github.com/priyadip/ecompress/releases/tag/v2.2.0
 [2.1.0]: https://github.com/priyadip/ecompress/releases/tag/v2.1.0
 [2.0.1]: https://github.com/priyadip/compress-cli/releases/tag/v2.0.1

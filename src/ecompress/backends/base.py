@@ -115,6 +115,25 @@ class Backend:
     def expect_pages(self, pages: int | None) -> None:
         self._expected_pages = pages
 
+    def record_estimate(self, size_bytes: int, *, label: str = "") -> None:
+        """Report a predicted size that is not itself a candidate output.
+
+        Used when a backend measures a short sample to decide settings: the
+        number is real information worth showing, but the file it came from is
+        the wrong length and must never be mistaken for a result.
+        """
+        job = self._require_job()
+        attempt = Attempt(
+            index=len(self._outcome.attempts) + 1,
+            size_bytes=size_bytes,
+            parameters={"estimated": True},
+            accepted=False,
+            valid=True,
+            note=f"{label}, estimated from sample" if label else "estimated from sample",
+        )
+        self._outcome.attempts.append(attempt)
+        job.reporter.attempt(attempt)
+
     def note(self, message: str) -> None:
         job = self._require_job()
         if message not in self._outcome.notes:

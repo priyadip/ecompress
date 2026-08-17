@@ -258,6 +258,70 @@ def test_crf_fills_a_floor_that_bitrate_control_cannot(tmp_path: Path) -> None:
     )
 
 
+def test_sampling_only_engages_on_long_sources() -> None:
+    """Short files are cheap to encode; a sample would only add error."""
+    from ecompress.backends.video import SAMPLE_TRIGGER_SECONDS, VideoBackend
+
+    assert VideoBackend._choose_sample(10.0) is None
+    assert VideoBackend._choose_sample(SAMPLE_TRIGGER_SECONDS) is None
+
+    sample = VideoBackend._choose_sample(300.0)
+    assert sample is not None
+    assert 0 < sample.length <= 300.0
+    assert sample.start >= 0
+    assert sample.start + sample.length <= 300.0
+    assert sample.scale == pytest.approx(300.0 / sample.length)
+
+
+def test_sample_never_runs_past_the_end_of_the_file() -> None:
+    from ecompress.backends.video import SAMPLE_TRIGGER_SECONDS, VideoBackend
+
+    for duration in (SAMPLE_TRIGGER_SECONDS + 1, 120.0, 349.6, 7200.0):
+        sample = VideoBackend._choose_sample(duration)
+        assert sample is not None
+        assert sample.start + sample.length <= duration + 1e-6, duration
+
+
+@requires_x264
+@pytest.mark.slow
+def test_a_proven_bitrate_carries_across_resolution_changes(tmp_path: Path) -> None:
+    """Regression: each rung restarted from the original bitrate estimate.
+
+    Having learned that, say, 3.13 Mbps works at 1440p, the search would drop
+    back to its opening 965 kbps guess on moving to 2160p - so the higher
+    resolution produced a *smaller* file than the rung below it, and the floor
+    stayed out of reach.
+    """
+    from .conftest import run_ffmpeg
+
+    frame = tmp_path / "frame.png"
+    run_ffmpeg(
+        ["-f", "lavfi", "-i", "testsrc2=size=1920x1080:rate=1:duration=1",
+         "-frames:v", "1", str(frame)]
+    )  # fmt: skip
+    source = tmp_path / "detail.mp4"
+    run_ffmpeg(
+        ["-loop", "1", "-i", str(frame), "-t", "6", "-r", "60",
+         "-c:v", "libx264", "-preset", "veryfast", "-crf", "12",
+         "-pix_fmt", "yuv420p", str(source)]
+    )  # fmt: skip
+
+    original = source.stat().st_size
+    result = compress(source, f"{original * 0.55 / 1e6}-{original * 0.75 / 1e6}")
+
+    rates: list[int] = [
+        int(a.parameters["video_bitrate"])
+        for a in result.attempts
+        if a.parameters.get("video_bitrate")
+    ]
+    if len(rates) > 2:
+        # Once a rate has been proven, later attempts must not fall back below
+        # the opening estimate.
+        assert max(rates[2:]) >= max(rates[:2]), (
+            f"the learned bitrate was discarded on a later rung: {rates}"
+        )
+
+
 def test_dotted_filename_keeps_only_the_real_extension(tmp_path: Path, source_jpg: Path) -> None:
     """Regression guard for the reported filename shape ``name.ai.mp4``."""
     path = tmp_path / "CasualIQBusinessIntelligence.ai.jpg"
