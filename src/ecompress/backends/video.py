@@ -25,7 +25,7 @@ from typing import NamedTuple
 from ecompress.backends.base import Backend, Job
 from ecompress.errors import ToolExecutionError
 from ecompress.ffmpeg import MediaInfo, first_available_encoder, probe, require_ffmpeg
-from ecompress.process import run_command
+from ecompress.process import run_with_progress
 from ecompress.quality import (
     VideoPlan,
     build_plan_ladder,
@@ -51,7 +51,9 @@ CONTAINER_OVERHEAD = 0.015
 #: Quality ladder, ascending (CRF counts down as quality goes up). Used when
 #: the duration is unknown, and to fill a size floor that average-bitrate
 #: control cannot reach.
-CRF_LADDER: tuple[int, ...] = (51, 48, 45, 42, 39, 36, 33, 30, 28, 26, 24, 22, 20, 18, 16)
+CRF_LADDER: tuple[int, ...] = (
+    51, 48, 45, 42, 39, 36, 33, 30, 28, 26, 24, 22, 20, 18, 16, 14, 12, 10,
+)  # fmt: skip
 
 #: Extra encodes allowed for the CRF fill, on top of the bitrate search.
 CRF_FILL_ENCODES = 4
@@ -365,8 +367,11 @@ class VideoBackend(Backend):
         # a quality level instead, so lowering it always buys more.
         if job.min_bytes is not None and best_overall < job.min_bytes and 0 <= index < len(ladder):
             filled = self._crf_fill(job, plan, ladder[index], audio_bps=audio_bps, sample=sample)
-            if filled is not None:
-                winner = filled
+            # Only adopt it if it is genuinely bigger. Quality targeting can
+            # still fall short of what the bitrate search managed, and settling
+            # for the worse of the two would throw away a better result.
+            if filled is not None and filled[1] > best_overall:
+                winner, best_overall = filled
 
         if sample is not None and winner is not None:
             self._encode_full(job, plan, winner, audio_bps=audio_bps, fixed_bytes=fixed_bytes)
@@ -437,10 +442,9 @@ class VideoBackend(Backend):
         args += self._encode_options(plan, bitrate, crf, audio_bps, video_plan)
         args.append(str(out))
 
-        try:
-            run_command(args, timeout=job.timeout, check=True, tool="ffmpeg")
-        except ToolExecutionError as exc:
-            job.reporter.note(f"encoder rejected these settings ({_first_line(exc.stderr)})")
+        if not self._run_encode(
+            job, args, seconds=sample.length, label=f"sample, {video_plan.describe()}"
+        ):
             return None
 
         if not out.exists():  # pragma: no cover - defensive
@@ -512,7 +516,7 @@ class VideoBackend(Backend):
         *,
         audio_bps: int,
         sample: _Sample | None = None,
-    ) -> _Settings | None:
+    ) -> tuple[_Settings, int] | None:
         """Reach a size floor that average-bitrate control cannot.
 
         ``-b:v`` asks for a mean bitrate, and libx264 will not pad a stream
@@ -540,7 +544,7 @@ class VideoBackend(Backend):
         )
         if outcome.best is None:
             return None
-        return _Settings(video_plan, crf=outcome.best.setting)
+        return _Settings(video_plan, crf=outcome.best.setting), outcome.best.size_bytes
 
     @staticmethod
     def _plan_above(
@@ -646,6 +650,32 @@ class VideoBackend(Backend):
             args += ["-movflags", "+faststart"]
         return args
 
+    def _run_encode(self, job: Job, args: list[str], *, seconds: float, label: str = "") -> bool:
+        """Run one encode, drawing a progress bar as FFmpeg works.
+
+        ``-progress pipe:1`` is inserted right after the executable so the
+        timeline position can be read as it goes; ``-nostats`` silences the
+        status line FFmpeg would otherwise scribble over the bar.
+        """
+        streamed = [args[0], "-progress", "pipe:1", "-nostats", *args[1:]]
+        reporter = job.reporter
+
+        try:
+            run_with_progress(
+                streamed,
+                total_seconds=seconds,
+                on_progress=lambda done: reporter.progress(done, label=label),
+                timeout=job.timeout,
+                tool="ffmpeg",
+            )
+        except ToolExecutionError as exc:
+            reporter.progress_done()
+            reporter.note(f"encoder rejected these settings ({_first_line(exc.stderr)})")
+            return False
+        finally:
+            reporter.progress_done()
+        return True
+
     def _encode(
         self,
         job: Job,
@@ -678,10 +708,8 @@ class VideoBackend(Backend):
         args += self._encode_options(plan, bitrate, crf, audio_bps, video_plan)
         args.append(str(out))
 
-        try:
-            run_command(args, timeout=job.timeout, check=True, tool="ffmpeg")
-        except ToolExecutionError as exc:
-            job.reporter.note(f"encoder rejected these settings ({_first_line(exc.stderr)})")
+        plan_label = video_plan.describe() if video_plan else "encoding"
+        if not self._run_encode(job, args, seconds=self._info.duration or 0.0, label=plan_label):
             return None
 
         label = _kbps(bitrate) if bitrate is not None else f"crf {crf}"

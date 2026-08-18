@@ -11,13 +11,14 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
-from collections.abc import Sequence
+import threading
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
 from ecompress.errors import MissingDependencyError, ToolExecutionError
 
-__all__ = ["CommandResult", "run_command"]
+__all__ = ["CommandResult", "run_command", "run_with_progress"]
 
 Arg = str | Path | int | float
 
@@ -112,3 +113,109 @@ def _decode(raw: bytes | None) -> str:
     if not raw:
         return ""
     return raw.decode("utf-8", errors="replace")
+
+
+def run_with_progress(
+    args: Sequence[Arg],
+    *,
+    total_seconds: float,
+    on_progress: Callable[[float], None],
+    timeout: float | None = None,
+    tool: str | None = None,
+) -> CommandResult:
+    """Run FFmpeg, reporting how far through the timeline it has reached.
+
+    ``-progress pipe:1`` makes FFmpeg emit ``key=value`` lines as it works. The
+    only one that matters here is the output timestamp, which divided by the
+    clip's duration gives a genuine fraction complete - far better than
+    guessing from bytes written, which jumps around with scene complexity.
+
+    stderr is drained on a second thread: FFmpeg writes enough of it to fill
+    the pipe buffer and deadlock if nobody is reading.
+    """
+    if not args:
+        raise ValueError("no command given")
+
+    argv = _stringify(args)
+    name = tool or Path(argv[0]).stem
+    errors: list[str] = []
+
+    try:
+        process = subprocess.Popen(  # noqa: S603 - argument list, shell=False
+            argv,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            shell=False,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            bufsize=1,
+            creationflags=_NO_WINDOW,
+        )
+    except FileNotFoundError as exc:
+        raise MissingDependencyError(
+            name, f"{name} could not be found on this system ({argv[0]})."
+        ) from exc
+    except PermissionError as exc:
+        raise MissingDependencyError(name, f"{name} is not executable: {argv[0]}") from exc
+
+    def drain_stderr() -> None:
+        if process.stderr is not None:
+            errors.extend(process.stderr)
+
+    reader = threading.Thread(target=drain_stderr, daemon=True)
+    reader.start()
+
+    # Reading FFmpeg's progress stream blocks until it exits, so a timeout
+    # cannot be enforced by the read loop - it needs something that can act
+    # while we are blocked.
+    expired = threading.Event()
+
+    def give_up() -> None:
+        expired.set()
+        process.kill()
+
+    watchdog = threading.Timer(timeout, give_up) if timeout else None
+    if watchdog is not None:
+        watchdog.start()
+
+    try:
+        if process.stdout is not None:
+            for line in process.stdout:
+                seconds = _progress_seconds(line)
+                if seconds is not None and total_seconds > 0:
+                    on_progress(max(0.0, min(seconds / total_seconds, 1.0)))
+        process.wait()
+    finally:
+        if watchdog is not None:
+            watchdog.cancel()
+        reader.join(timeout=5)
+        for stream in (process.stdout, process.stderr):
+            if stream is not None:
+                stream.close()
+
+    if expired.is_set():
+        raise ToolExecutionError(name, -1, f"{name} timed out after {timeout} seconds.")
+
+    result = CommandResult(
+        args=tuple(argv), returncode=process.returncode, stdout="", stderr="".join(errors)
+    )
+    if not result.ok:
+        raise ToolExecutionError(name, result.returncode, result.stderr)
+    return result
+
+
+def _progress_seconds(line: str) -> float | None:
+    """Seconds of output written, from one ``-progress`` line.
+
+    ``out_time_ms`` is a long-standing FFmpeg misnomer - it carries
+    microseconds - so the explicit ``out_time_us`` is preferred where present
+    and both are divided by a million.
+    """
+    key, _, value = line.strip().partition("=")
+    if key not in {"out_time_us", "out_time_ms"}:
+        return None
+    try:
+        return int(value) / 1_000_000
+    except ValueError:
+        return None

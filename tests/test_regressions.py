@@ -322,6 +322,29 @@ def test_a_proven_bitrate_carries_across_resolution_changes(tmp_path: Path) -> N
         )
 
 
+def test_crf_fill_reports_its_size_so_a_worse_result_is_not_adopted() -> None:
+    """Regression: quality targeting could replace a better bitrate result.
+
+    On a 4K screen recording the bitrate search reached 38.3 MB, then the CRF
+    fill managed only 34.4 MB - and the caller adopted it anyway, delivering
+    the smaller of the two against a 40 MB floor. The fill now reports the size
+    it achieved so the caller can refuse a step backwards.
+    """
+    import inspect
+
+    from ecompress.backends.video import VideoBackend
+
+    signature = inspect.signature(VideoBackend._crf_fill)
+    assert "tuple" in str(signature.return_annotation), (
+        "the fill must report its size, not just the settings"
+    )
+
+    source = inspect.getsource(VideoBackend._bitrate_search)
+    assert "filled[1] > best_overall" in source, (
+        "the fill result must be compared against what was already achieved"
+    )
+
+
 def test_dotted_filename_keeps_only_the_real_extension(tmp_path: Path, source_jpg: Path) -> None:
     """Regression guard for the reported filename shape ``name.ai.mp4``."""
     path = tmp_path / "CasualIQBusinessIntelligence.ai.jpg"

@@ -51,8 +51,16 @@ def test_shell_metacharacters_are_not_interpreted(tmp_path: Path) -> None:
     ],
 )
 def test_hostile_arguments_arrive_unchanged(hostile: str) -> None:
+    # Write bytes, not text: a Windows console defaults to cp1252 and would
+    # fail to encode these on the way out, which says nothing about whether
+    # the argument survived the process boundary.
     result = run_command(
-        [sys.executable, "-c", "import sys; sys.stdout.write(sys.argv[1])", hostile]
+        [
+            sys.executable,
+            "-c",
+            "import sys; sys.stdout.buffer.write(sys.argv[1].encode('utf-8'))",
+            hostile,
+        ]
     )
     assert result.stdout == hostile
 

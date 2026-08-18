@@ -68,7 +68,7 @@ ecompress --check
 ```
 
 ```text
-ecompress 2.3.0
+ecompress 2.4.0
 Python 3.12.10 on Windows 11 (AMD64)
 
 Video and audio (FFmpeg)
@@ -179,6 +179,16 @@ ecompress "scan.pdf" 1.5
 ```
 
 Fractional targets work: `0.5`, `1.5`, `49.9` are all valid.
+
+While a video encodes you get a progress bar, a percentage and an estimate of
+the time remaining:
+
+```text
+  [#####...................]  21%  0:09 left  2560x1440 @ 24 fps
+```
+
+It is drawn only to a real terminal, so piping the output somewhere or using
+`--quiet` / `--json` stays clean.
 
 ## Setting a minimum too
 

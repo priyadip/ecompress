@@ -5,6 +5,47 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.4.0] - 2026-08-18
+
+### Added
+
+- **A progress bar while encoding.** Long encodes printed nothing for minutes
+  at a time, so a run was indistinguishable from a hang. FFmpeg's own
+  `-progress` stream now drives a bar with a percentage, an estimate of the
+  time left, and what is being encoded:
+
+  ```text
+    [#####...................]  21%  0:09 left  2560x1440 @ 24 fps
+  ```
+
+  It is drawn only to a real terminal - piped into a file or another program
+  it stays silent, and `--quiet` and `--json` are unaffected. The estimate is
+  withheld for the first few percent, where it would be dominated by start-up
+  cost and read wildly wrong.
+
+### Fixed
+
+- **Quality targeting could replace a better result with a worse one.** On a 4K
+  screen recording the bitrate search reached 38.3 MB, the CRF fill managed
+  only 34.4 MB, and the fill's result was adopted anyway - delivering the
+  smaller of the two against a 40 MB floor. The fill now reports the size it
+  achieved, and is only taken if it actually improves on what came before.
+
+- The CRF ladder stopped at 16, which was not always enough to fill a window on
+  very compressible 4K. It now runs down to 10, close to visually lossless.
+
+- `--timeout` was not enforced during an encode. Reading FFmpeg's progress
+  stream blocks until it exits, so the deadline could only be noticed after the
+  work had already finished. A watchdog now stops the encode on time.
+
+### Notes
+
+- `test_hostile_arguments_arrive_unchanged` depended on the *child* process's
+  stdout encoding, which is cp1252 on a Windows console; it passed in CI only
+  because `PYTHONUTF8=1` is set there. The test now compares bytes, so it
+  checks what it meant to check - that the argument survives the process
+  boundary - regardless of console encoding.
+
 ## [2.3.0] - 2026-08-18
 
 ### Fixed
@@ -309,6 +350,7 @@ Never published to PyPI; superseded by 1.1.0 before release. Requires Python
 - Scratch files are created in a private per-run directory with
   `tempfile.mkdtemp`.
 
+[2.4.0]: https://github.com/priyadip/ecompress/releases/tag/v2.4.0
 [2.3.0]: https://github.com/priyadip/ecompress/releases/tag/v2.3.0
 [2.2.0]: https://github.com/priyadip/ecompress/releases/tag/v2.2.0
 [2.1.0]: https://github.com/priyadip/ecompress/releases/tag/v2.1.0
