@@ -29,13 +29,24 @@ def _pdf_in_folder_with_spaces(tmp_path: Path) -> Path:
     return make_pdf(folder / "book one.pdf", 10)
 
 
-def test_arguments_as_bash_cmd_and_powershell_stop_parsing_deliver_them(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+@pytest.mark.parametrize(
+    "shape",
+    [
+        "cmd or bash",  # cut_pdf "…/book one.pdf"[2-3] "…/out dir"
+        "range inside quotes",  # cut_pdf "…/book one.pdf[2-3]" "…/out dir"
+        "powershell --%",  # cut_pdf --% "…/book one.pdf"[2-3] "…/out dir"
+    ],
+)
+def test_arguments_as_shells_deliver_them(
+    shape: str, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     book = _pdf_in_folder_with_spaces(tmp_path)
     out = tmp_path / "out dir"
-    # cut_pdf "…/My Docs/book one.pdf"[2-3] '->' "…/out dir"   (quotes removed)
-    assert main_cut_pdf(["--%", f"{book}[2-3]", "->", str(out)]) == 0
+    # All three arrive as the same words once the shell has removed the quotes.
+    argv = [f"{book}[2-3]", str(out)]
+    if shape == "powershell --%":
+        argv.insert(0, "--%")
+    assert main_cut_pdf(argv) == 0
 
     output = out / "book one_pages_2-3.pdf"
     assert page_ids(output) == [102, 103]
@@ -48,8 +59,8 @@ def test_arguments_as_bash_cmd_and_powershell_stop_parsing_deliver_them(
 def test_arguments_as_windows_powershell_splits_a_quoted_line(tmp_path: Path) -> None:
     book = _pdf_in_folder_with_spaces(tmp_path)
     second = make_pdf(tmp_path / "My Docs" / "other.pdf", 3, base=500)
-    # cut_pdf '"…/book one.pdf" "…/other.pdf"[3] -> "…/out"'  under PowerShell 5.1
-    argv = f"{book} {second}[3] -> {tmp_path / 'out'}".split(" ")
+    # add_pdf '"…/book one.pdf" "…/other.pdf"[3] "…/out"'  under PowerShell 5.1
+    argv = f"{book} {second}[3] {tmp_path / 'out'}".split(" ")
     assert main_add_pdf(["-q", *argv]) == 0
     assert page_ids(tmp_path / "out" / "book one_merged.pdf") == [*range(101, 111), 503]
 
@@ -61,17 +72,16 @@ def test_quoted_text_and_the_operation_word(tmp_path: Path) -> None:
     assert page_ids(tmp_path / "a_merged.pdf") == [101, 503]
 
 
-def test_swallowed_arrow_is_caught_before_anything_runs(
+def test_old_arrow_is_explained_before_anything_runs(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     book = make_pdf(tmp_path / "book.pdf", 4)
     before = sorted(tmp_path.iterdir())
-    # bash / cmd / PowerShell for:  cut_pdf "book.pdf"[1-2] -> "D:/out"
+    # What bash or cmd pass on for:  cut_pdf "book.pdf"[1-2] -> "D:/out"
     assert main_cut_pdf([f"{book}[1-2]", "-"]) == 2
     err = capsys.readouterr().err
-    assert "Your shell read the '>'" in err
-    assert 'cut_pdf --% "C:/My Documents/book.pdf"[2-5,8-12,20] -> "D:/out"' in err
-    assert "'->'" in err and '"->"' in err and "noglob" in err
+    assert "There is no '->'" in err
+    assert 'cut_pdf "C:/My Documents/book.pdf"[2-5,8-12,20] "D:/out"' in err
     assert sorted(tmp_path.iterdir()) == before
 
 
@@ -91,9 +101,11 @@ def test_json_and_quiet_output(tmp_path: Path, capsys: pytest.CaptureFixture[str
 def test_help_and_version(operation: str, capsys: pytest.CaptureFixture[str]) -> None:
     assert MAINS[operation](["--help"]) == 0
     text = capsys.readouterr().out
-    assert text.startswith(f'usage: {operation} "PATH"[RANGE] ... [-> "FOLDER"]')
+    assert text.startswith(f'usage: {operation} "PATH"[RANGE] ... ["FOLDER"]')
     assert "examples:" in text
-    assert f"PowerShell   {operation} --% " in text
+    assert "->" not in text
+    assert f"  {operation} --% " in text
+    assert re.search(rf'  {operation} "[^"]*\[[^\]]*\]"', text), "range-inside-quotes form"
     assert ("--copy" in text) == (operation == "cut_video")
 
     assert MAINS[operation](["--version"]) == 0
@@ -109,7 +121,7 @@ def test_help_and_version(operation: str, capsys: pytest.CaptureFixture[str]) ->
         (['"a.pdf"[1-'], "closing ']'"),
         (['cut_video "a.mp4"[1-2]'], "This is the cut_pdf command"),
         (['"missing-file.pdf"[1]'], "File not found"),
-        (["--%", "missing-file.pdf[1]"], "File not found"),
+        (["--%", "missing-file.pdf[1]", "out"], "File not found"),
     ],
 )
 def test_usage_errors_exit_2(
@@ -122,6 +134,7 @@ def test_usage_errors_exit_2(
     monkeypatch.chdir(tmp_path)
     assert main_cut_pdf(argv) == 2
     assert message in capsys.readouterr().err
+    assert not (tmp_path / "out").exists()
 
 
 def test_missing_ffmpeg_exits_3(
@@ -144,7 +157,7 @@ def test_failed_operation_exits_1(
         raise OutputValidationError("The new video failed validation (boom); nothing was written.")
 
     monkeypatch.setattr("ecompress.edit.run_video", broken)
-    assert main_add_video(['"a.mp4" "b.mp4"']) == 1
+    assert main_add_video(['"a.mp4"[0-1] "b.mp4"[0-1]']) == 1
     assert "boom" in capsys.readouterr().err
 
 
@@ -152,10 +165,10 @@ def test_failed_operation_exits_1(
 def test_cut_video_command(
     tmp_path: Path, source_mp4: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    assert main_cut_video(["--json", f"{source_mp4}[0-1]", "->", str(tmp_path)]) == 0
+    assert main_cut_video(["--json", f"{source_mp4}[0-1]", str(tmp_path / "clips")]) == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload["duration_seconds"] == pytest.approx(1.0, abs=0.15)
-    assert Path(payload["output_path"]) == (tmp_path / "clip_cut.mp4").resolve()
+    assert Path(payload["output_path"]) == (tmp_path / "clips" / "clip_cut.mp4").resolve()
 
 
 def test_console_scripts_are_declared() -> None:

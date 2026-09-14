@@ -375,10 +375,10 @@ Four more commands share one grammar — a file, a range in brackets, and
 optionally where to save:
 
 ```text
-add_pdf   "D:/a.pdf"[2-9] "D:/b.pdf"[7-16] -> "D:/out"
-cut_pdf   "C:/My Documents/book.pdf"[2-5,8-12,20] -> "D:/out"
-add_video "a.mp4"[00:00-00:30] "b.mp4"[01:10-02:00] -> "D:/out"
-cut_video "movie.mp4"[00:02:10-00:05:30] -> "D:/out"
+add_pdf   "D:/a.pdf"[2-9] "D:/b.pdf"[7-16] "D:/out"
+cut_pdf   "C:/My Documents/book.pdf"[2-5,8-12,20] "D:/out"
+add_video "a.mp4"[00:00-00:30] "b.mp4"[01:10-02:00] "D:/out"
+cut_video "movie.mp4"[00:02:10-00:05:30] "D:/out"
 ```
 
 | Operation   | Does                                        | Output name          |
@@ -388,30 +388,27 @@ cut_video "movie.mp4"[00:02:10-00:05:30] -> "D:/out"
 | `add_video` | time ranges from two or more videos, joined | `a_joined.mp4`       |
 | `cut_video` | time ranges from one video                  | `movie_cut.mp4`      |
 
-**`-> "D:/out"` is optional.** Without it the result is saved in the same
-folder as the (first) input under a new name — `book_pages_7-16.pdf`, or
+**The folder at the end is optional.** Without it the result is saved in the
+same folder as the (first) input under a new name — `book_pages_7-16.pdf`, or
 `book_pages_7-16_1.pdf` if that is taken. An existing file is never replaced.
+The last path is the output when it has no `[range]`; for `add_pdf` and
+`add_video`, an existing file in that place is one more whole-file input.
 
-**Typing it in a terminal.** Shells claim some of these characters before the
-command runs: the `>` in `->` means "write output to a file" in every shell,
-PowerShell reads `"book.pdf"[2-9]` as indexing into a string, and zsh treats
-`[...]` as a file pattern. So type it like this:
+**PowerShell and zsh.** In cmd and bash the lines above work exactly as
+written. PowerShell reads `"book.pdf"[2-9]` as indexing into a string, and zsh
+treats `[...]` as a file pattern, so there put the range inside the quotes —
+which works in every shell — or tell PowerShell to leave the line alone with
+`--%`:
 
-| Shell         | Command                                                              |
-| ------------- | -------------------------------------------------------------------- |
-| PowerShell    | `cut_pdf --% "C:/My Documents/book.pdf"[2-5,8-12,20] -> "D:/out"`    |
-| cmd           | `cut_pdf "C:/My Documents/book.pdf"[2-5,8-12,20] "->" "D:/out"`      |
-| bash          | `cut_pdf "C:/My Documents/book.pdf"[2-5,8-12,20] '->' "D:/out"`      |
-| zsh (macOS)   | `noglob cut_pdf "book.pdf"[2-5,8-12,20] '->' "D:/out"`               |
+```text
+cut_pdf "C:/My Documents/book.pdf[2-5,8-12,20]" "D:/out"
+cut_pdf --% "C:/My Documents/book.pdf"[2-5,8-12,20] "D:/out"
+```
 
-`--%` makes PowerShell pass the rest of the line through untouched. Without
-`->`, cmd and bash need nothing extra. If a shell does swallow the arrow, the
-command notices and stops with these instructions instead of doing anything.
-Scripts and LLM agents that start the command from an argument list, and
-`execute()` in Python, take the line exactly as written.
-
-Quotes around paths are optional; they are only needed for a file without a
-range whose path contains spaces and does not exist yet.
+Quotes around paths are optional: the commands work out where each path ends
+even after a shell has removed them. Scripts and LLM agents that start a
+command from an argument list, and `execute()` in Python, take the line
+exactly as written.
 
 **Ranges**
 
@@ -421,7 +418,7 @@ range whose path contains spaces and does not exist yet.
 - Times: `130` (seconds), `02:10`, `00:02:10`, `1:02:03.5`. Ranges are
   `start-end` or `01:20-end`; several may be joined with commas.
 
-**Output.** The folder after `->` is created if needed. A target ending in
+**Output.** The output folder is created if needed. A target ending in
 `.pdf` / `.mp4` / `.mkv` / `.mov` / `.webm` / `.avi` names the file exactly
 (`--overwrite` to replace one). Existing files are never replaced otherwise,
 and an input never is.
@@ -447,7 +444,7 @@ From Python:
 ```python
 from ecompress import add_pdf, add_video, cut_pdf, cut_video, execute
 
-execute('cut_pdf "book.pdf"[7-16] -> "D:/out"')
+execute('cut_pdf "book.pdf"[7-16] "D:/out"')
 
 cut_pdf("book.pdf", "2-5,8-12,20")
 add_pdf([("a.pdf", "2-9"), ("b.pdf", "7-16")], output="D:/out")

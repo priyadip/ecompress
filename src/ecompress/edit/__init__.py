@@ -2,16 +2,16 @@
 
 ::
 
-    add_pdf   "D:/a.pdf"[2-9] "D:/b.pdf"[7-16] -> "D:/out"
-    cut_pdf   "C:/My Documents/book.pdf"[2-5,8-12,20] -> "D:/out"
-    add_video "a.mp4"[00:00-00:30] "b.mp4"[01:10-02:00] -> "D:/out"
+    add_pdf   "D:/a.pdf"[2-9] "D:/b.pdf"[7-16] "D:/out"
+    cut_pdf   "C:/My Documents/book.pdf"[2-5,8-12,20] "D:/out"
+    add_video "a.mp4"[00:00-00:30] "b.mp4"[01:10-02:00] "D:/out"
     cut_video "movie.mp4"[00:02:10-00:05:30]
 
 Python usage::
 
     from ecompress import execute, cut_pdf, add_video
 
-    execute('cut_pdf "book.pdf"[7-16] -> "D:/out"')
+    execute('cut_pdf "book.pdf"[7-16] "D:/out"')
     cut_pdf("book.pdf", "2-5,8-12,20", output="D:/out")
     add_video([("a.mp4", "00:00-00:30"), ("b.mp4", "01:10-02:00")])
 """
@@ -60,12 +60,12 @@ def execute(
     reporter: Reporter | None = None,
     timeout: float | None = None,
 ) -> EditResult:
-    """Parse and run a command such as ``'cut_pdf "book.pdf"[7-16] -> "D:/out"'``.
+    """Parse and run a command such as ``'cut_pdf "book.pdf"[7-16] "D:/out"'``.
 
     Args:
         command: the command text. The operation word may be left out if
             ``operation`` is given.
-        overwrite: allow an explicit ``-> "file.ext"`` to replace a file.
+        overwrite: allow a file name given as the output to replace a file.
         copy: ``cut_video`` only - cut without re-encoding (instant, lossless,
             keyframe-aligned).
         reporter: receives progress; silent by default.

@@ -23,18 +23,20 @@ from ecompress.errors import CommandSyntaxError
 
 
 def test_the_documented_examples() -> None:
-    add = parse_command('add_pdf   "D:/a.pdf"[2-9] "D:/b.pdf"[7-16] -> "D:/out"')
+    add = parse_command('add_pdf   "D:/a.pdf"[2-9] "D:/b.pdf"[7-16]  "D:/out"')
     assert add == Command(
         "add_pdf",
         (Source(Path("D:/a.pdf"), "2-9"), Source(Path("D:/b.pdf"), "7-16")),
         Path("D:/out"),
     )
 
-    cut = parse_command('cut_pdf   "C:/My Documents/book.pdf"[2-5,8-12,20] -> "D:/out"')
+    cut = parse_command('cut_pdf   "C:/My Documents/book.pdf"[2-5,8-12,20]  "D:/out"')
     assert cut.sources == (Source(Path("C:/My Documents/book.pdf"), "2-5,8-12,20"),)
+    assert cut.output == Path("D:/out")
 
-    join = parse_command('add_video "a.mp4"[00:00-00:30] "b.mp4"[01:10-02:00] -> "D:/out"')
+    join = parse_command('add_video "a.mp4"[00:00-00:30] "b.mp4"[01:10-02:00]  "D:/out"')
     assert [source.spec for source in join.sources] == ["00:00-00:30", "01:10-02:00"]
+    assert join.output == Path("D:/out")
 
     clip = parse_command('cut_video "movie.mp4"[00:02:10-00:05:30]')
     assert clip.output is None
@@ -51,32 +53,57 @@ EXPECTED = Command(
 @pytest.mark.parametrize(
     "argv",
     [
-        # bash, cmd, and PowerShell after --%: the shell removes the quotes.
-        ["D:/My Docs/a.pdf[2-9]", "D:/b.pdf[7-16]", "->", "D:/out dir"],
+        # cmd, bash, and PowerShell after --%: the shell removes the quotes.
+        ["D:/My Docs/a.pdf[2-9]", "D:/b.pdf[7-16]", "D:/out dir"],
         # Windows PowerShell 5.1 given the whole line in single quotes.
-        ["D:/My", "Docs/a.pdf[2-9] D:/b.pdf[7-16] -> D:/out", "dir"],
-        # A shell that keeps the inner quotes, or an argument list with no shell.
-        ['"D:/My Docs/a.pdf"[2-9] "D:/b.pdf"[7-16] -> "D:/out dir"'],
-        ['"D:/My Docs/a.pdf"[2-9]', '"D:/b.pdf"[7-16]', "->", '"D:/out dir"'],
+        ["D:/My", "Docs/a.pdf[2-9] D:/b.pdf[7-16] D:/out", "dir"],
+        # A shell that keeps the quotes, or an argument list with no shell.
+        ['"D:/My Docs/a.pdf"[2-9] "D:/b.pdf"[7-16] "D:/out dir"'],
+        # The range inside the quotes, as PowerShell and zsh users type it.
+        ['"D:/My Docs/a.pdf[2-9]"', '"D:/b.pdf[7-16]"', '"D:/out dir"'],
     ],
 )
 def test_every_way_a_shell_delivers_the_line(argv: list[str]) -> None:
     assert parse_command(" ".join(argv), operation="add_pdf") == EXPECTED
 
 
-def test_single_quotes_backslashes_and_no_spaces_around_the_arrow() -> None:
-    command = parse_command(r"cut_video 'C:\Videos\my movie.mp4' [01:20-05:40]->'D:\out'")
+def test_single_quotes_and_backslashes() -> None:
+    command = parse_command(r"cut_video 'C:\Videos\my movie.mp4' [01:20-05:40] 'D:\out'")
     assert command.sources == (Source(Path(r"C:\Videos\my movie.mp4"), "01:20-05:40"),)
     assert command.output == Path(r"D:\out")
 
 
-def test_arrow_and_apostrophe_inside_unquoted_names() -> None:
-    command = parse_command("cut_pdf D:/Tom's a->b.pdf[1-2] -> D:/out")
+def test_apostrophes_and_arrows_inside_unquoted_names() -> None:
+    command = parse_command("cut_pdf D:/Tom's a->b.pdf[1-2] D:/out dir")
     assert command.sources == (Source(Path("D:/Tom's a->b.pdf"), "1-2"),)
-    assert command.output == Path("D:/out")
+    assert command.output == Path("D:/out dir")
 
 
-def test_unquoted_inputs_without_ranges_split_where_files_exist(tmp_path: Path) -> None:
+def test_cut_takes_the_last_path_as_output_even_if_it_exists(tmp_path: Path) -> None:
+    existing = tmp_path / "pages.pdf"
+    existing.write_bytes(b"%PDF")
+    command = parse_command(f'cut_pdf "book.pdf"[1] "{existing}"')
+    assert command.output == existing
+
+
+def test_add_treats_an_existing_last_file_as_an_input(tmp_path: Path) -> None:
+    first, second = tmp_path / "a.pdf", tmp_path / "b.pdf"
+    for path in (first, second):
+        path.write_bytes(b"%PDF")
+
+    whole = parse_command(f'add_pdf "{first}" "{second}"')
+    assert whole.sources == (Source(first), Source(second))
+    assert whole.output is None
+
+    into_folder = parse_command(f'add_pdf "{first}" "{second}" "{tmp_path}"')
+    assert into_folder.sources == (Source(first), Source(second))
+    assert into_folder.output == tmp_path
+
+    new_file = parse_command(f'add_pdf "{first}" "{second}" "{tmp_path / "joined.pdf"}"')
+    assert new_file.output == tmp_path / "joined.pdf"
+
+
+def test_unquoted_whole_files_split_where_files_exist(tmp_path: Path) -> None:
     folder = tmp_path / "My Docs"
     folder.mkdir()
     first, second = folder / "a b.pdf", folder / "c d.pdf"
@@ -84,7 +111,7 @@ def test_unquoted_inputs_without_ranges_split_where_files_exist(tmp_path: Path) 
         path.write_bytes(b"%PDF")
 
     command = parse_command(
-        f"{first} {second} {second}[2] -> {tmp_path / 'out dir'}", operation="add_pdf"
+        f"{first} {second} {second}[2] {tmp_path / 'out dir'}", operation="add_pdf"
     )
     assert command.sources == (Source(first), Source(second), Source(second, "2"))
     assert command.output == tmp_path / "out dir"
@@ -96,6 +123,10 @@ def test_brackets_in_a_folder_name_prefer_the_real_file(tmp_path: Path) -> None:
     pdf = folder / "a.pdf"
     pdf.write_bytes(b"%PDF")
     assert parse_command(f"cut_pdf {pdf}[1-2]").sources == (Source(pdf, "1-2"),)
+    # A file whose real name ends in brackets is not split inside quotes.
+    odd = tmp_path / "scan[1].pdf"
+    odd.write_bytes(b"%PDF")
+    assert parse_command(f'add_pdf "{odd}" "{pdf}"').sources == (Source(odd), Source(pdf))
 
 
 def test_operation_may_come_from_the_caller() -> None:
@@ -104,8 +135,17 @@ def test_operation_may_come_from_the_caller() -> None:
     assert parse_command("movie.mp4[1-2]", operation="cut_video").sources[0].path == Path(
         "movie.mp4"
     )
-    my_file = parse_command("my file.pdf[1]", operation="cut_pdf")
+    my_file = parse_command("my file.pdf[1] my folder", operation="cut_pdf")
     assert my_file.sources == (Source(Path("my file.pdf"), "1"),)
+    assert my_file.output == Path("my folder")
+
+
+@pytest.mark.parametrize("arrow", ["-", "->"])
+def test_the_old_arrow_is_explained(arrow: str) -> None:
+    with pytest.raises(CommandSyntaxError, match=r"There is no '->'.*put the output folder last"):
+        parse_command(f'cut_pdf "book.pdf"[1-2] {arrow} "D:/out"'.replace(' "D:/out"', ""))
+    with pytest.raises(CommandSyntaxError, match="There is no '->'"):
+        parse_command(f'cut_pdf "book.pdf"[1-2] {arrow} "D:/out"')
 
 
 @pytest.mark.parametrize(
@@ -117,14 +157,10 @@ def test_operation_may_come_from_the_caller() -> None:
         ('cut_video "a.mp4"[1-2]', "cut_pdf", "This is the cut_pdf command"),
         ('cut_pdf "a.pdf"', None, "needs a range in [...]"),
         ('cut_pdf "a.pdf"[1] "b.pdf"[1]', None, "takes exactly one file"),
+        ('cut_pdf "a.pdf"[1] "b" "c"', None, "takes exactly one file"),
         ('add_pdf "a.pdf"[1]', None, "two or more files"),
+        ('add_pdf "a.pdf"[1] "D:/out"', None, "two or more files"),
         ("cut_pdf", None, "No input file given"),
-        ('cut_pdf -> "out"', None, "No input file given"),
-        ('cut_pdf "a.pdf"[1] ->', None, "'->' must be followed by a folder"),
-        ('cut_pdf "a.pdf"[1] -> ""', None, "'->' must be followed by a folder"),
-        ('cut_pdf "a.pdf"[1] -> "o" -> "p"', None, "'->' appears more than once"),
-        ('cut_pdf "a.pdf"[1] -> "o" [2]', None, "Nothing may follow the output folder"),
-        ('cut_pdf "a.pdf"[1] -> "o', None, 'output folder is missing its closing "'),
         ('cut_pdf "a.pdf"[1-2', None, "the range is missing its closing ']'"),
         ("cut_pdf a.pdf[1-2", None, "the range is missing its closing ']'"),
         ('cut_pdf "a.pdf[1]', None, 'is missing its closing "'),

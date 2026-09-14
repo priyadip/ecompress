@@ -1,21 +1,23 @@
 """The command language shared by the PDF and video editing commands.
 
-One grammar for every operation::
+One grammar for every operation - inputs with ranges, then optionally where to
+save::
 
-    <operation> "<path>"[<range>] ... -> "<folder or file>"
-
-    add_pdf   "D:/a.pdf"[2-9] "D:/b.pdf"[7-16] -> "D:/out"
-    cut_pdf   "C:/My Documents/book.pdf"[2-5,8-12,20] -> "D:/out"
-    add_video "a.mp4"[00:00-00:30] "b.mp4"[01:10-02:00] -> "D:/out"
+    add_pdf   "D:/a.pdf"[2-9] "D:/b.pdf"[7-16] "D:/out"
+    cut_pdf   "C:/My Documents/book.pdf"[2-5,8-12,20] "D:/out"
+    add_video "a.mp4"[00:00-00:30] "b.mp4"[01:10-02:00] "D:/out"
     cut_video "movie.mp4"[00:02:10-00:05:30]
 
-``-> "folder"`` is optional, and so are the quotes around paths - which
-matters, because shells remove them before a program sees its arguments:
-bash hands over ``D:/My Docs/a.pdf[2-9]``, and Windows PowerShell 5.1 can even
-split one argument at its spaces. The console scripts therefore join their
-arguments back into one line, and an unquoted path is read up to its
-``[range]`` - or, for an input without a range, up to where it names a file
-that exists.
+The last path is the output when it has no range - except that for ``add_*``
+an existing file there is one more whole-file input. A range may also sit
+inside the quotes (``"book.pdf[7-16]"``), which is how it survives PowerShell.
+
+Quotes around paths are optional, which matters because shells remove them
+before a program sees its arguments: bash hands over ``D:/My Docs/a.pdf[2-9]``,
+and Windows PowerShell 5.1 can even split one argument at its spaces. The
+console scripts join their arguments back into one line; an unquoted path is
+read up to its ``[range]``, or where it has none, up to the point where it
+names an existing file.
 """
 
 from __future__ import annotations
@@ -46,16 +48,20 @@ OPERATIONS = ("add_pdf", "cut_pdf", "add_video", "cut_video")
 END_TOLERANCE_SECONDS = 0.5
 
 EXAMPLES = {
-    "add_pdf": 'add_pdf "D:/a.pdf"[2-9] "D:/b.pdf"[7-16] -> "D:/out"',
-    "cut_pdf": 'cut_pdf "C:/My Documents/book.pdf"[2-5,8-12,20] -> "D:/out"',
-    "add_video": 'add_video "a.mp4"[00:00-00:30] "b.mp4"[01:10-02:00] -> "D:/out"',
-    "cut_video": 'cut_video "movie.mp4"[00:02:10-00:05:30] -> "D:/out"',
+    "add_pdf": 'add_pdf "D:/a.pdf"[2-9] "D:/b.pdf"[7-16] "D:/out"',
+    "cut_pdf": 'cut_pdf "C:/My Documents/book.pdf"[2-5,8-12,20] "D:/out"',
+    "add_video": 'add_video "a.mp4"[00:00-00:30] "b.mp4"[01:10-02:00] "D:/out"',
+    "cut_video": 'cut_video "movie.mp4"[00:02:10-00:05:30] "D:/out"',
 }
 
 _OPERATION_WORD = re.compile(r"\s*([A-Za-z_]\w*)(?=\s|$)")
 # A [range] closing an unquoted input: followed by whitespace or the end.
 _RANGE_AT_WORD_END = re.compile(r"\[([^\[\]]*)\](?=\s|$)")
-_NON_SPACE = re.compile(r"\S+")
+# A range written inside the quotes: "book.pdf[7-16]".
+_TRAILING_RANGE = re.compile(r"(.*\S)\[([^\[\]]*)\]")
+_NEXT_QUOTED_WORD = re.compile(r"\s(?=[\"'])")
+#: What a shell leaves behind of the ``->`` these commands no longer use.
+_ARROWS = frozenset({"-", "->"})
 
 
 @dataclass(frozen=True)
@@ -84,7 +90,7 @@ class Command:
         if verb == "cut":
             if len(self.sources) != 1:
                 raise CommandSyntaxError(
-                    f"{self.operation} takes exactly one file; "
+                    f"{self.operation} takes exactly one file, then optionally a folder; "
                     f"use add_{kind} to combine several. Example:\n  {example}"
                 )
             if self.sources[0].spec is None:
@@ -134,10 +140,29 @@ def parse_command(text: str, *, operation: str | None = None) -> Command:
             "The command must start with an operation: " + ", ".join(OPERATIONS) + "."
         )
 
-    inputs, target = _split_arrow(text, pos)
-    sources = _read_inputs(inputs)
-    output = None if target is None else _read_output(target)
-    return Command(operation, tuple(sources), output)
+    items = _read_items(text[pos:])
+    if any(item.spec is None and str(item.path) in _ARROWS for item in items):
+        raise CommandSyntaxError(
+            "There is no '->' in these commands; put the output folder last:\n"
+            f"  {EXAMPLES[operation]}\n"
+            "If '->' was typed in a shell, the shell may also have created a file "
+            "named after the folder."
+        )
+    sources, output = _split_output(operation, items)
+    return Command(operation, sources, output)
+
+
+def _split_output(operation: str, items: list[Source]) -> tuple[tuple[Source, ...], Path | None]:
+    """The last item is the output if it has no range.
+
+    ``cut_*`` inputs always have a range, so there is no doubt. ``add_*``
+    also takes whole files, so an existing file in the last place is an input.
+    """
+    if len(items) >= 2 and items[-1].spec is None:
+        last = items[-1].path
+        if operation.startswith("cut_") or not _is_file(str(last)):
+            return tuple(items[:-1]), last
+    return tuple(items), None
 
 
 def _unknown(name: str) -> str:
@@ -161,91 +186,16 @@ def _is_file(text: str) -> bool:
         return False
 
 
-def _split_arrow(text: str, pos: int) -> tuple[str, str | None]:
-    """Split at the ``->`` that is not inside quotes or a range.
-
-    A quote only opens at the start of a word, so the apostrophe in an
-    unquoted ``Tom's video.mp4`` is just a character. ``->`` must start a
-    word or follow ``]`` or a closing quote, so ``a->b.pdf`` is a file name.
-    """
-    arrow: int | None = None
-    quote: str | None = None
-    in_range = False
-    index = pos
-    while index < len(text):
-        char = text[index]
-        starts_word = index == pos or text[index - 1].isspace()
-        if quote is not None:
-            if char == quote:
-                quote = None
-        elif char in "\"'" and starts_word:
-            quote = char
-        elif char == "[":
-            in_range = True
-        elif char == "]":
-            in_range = False
-        elif (
-            not in_range
-            and text.startswith("->", index)
-            and (starts_word or text[index - 1] in "]\"'")
-        ):
-            if arrow is not None:
-                raise CommandSyntaxError("'->' appears more than once.")
-            arrow = index
-            index += 2
-            continue
-        index += 1
-    if arrow is None:
-        return text[pos:], None
-    return text[pos:arrow], text[arrow + 2 :]
-
-
-def _read_output(target: str) -> Path:
-    value = target.strip()
-    if value[:1] in {'"', "'"}:
-        close = value.find(value[0], 1)
-        if close < 0:
-            raise CommandSyntaxError(f"The output folder is missing its closing {value[0]}.")
-        rest = value[close + 1 :].strip()
-        if rest:
-            raise CommandSyntaxError(
-                f"Nothing may follow the output folder; found {_excerpt(rest)}."
-            )
-        value = value[1:close]
-    if not value.strip():
-        raise CommandSyntaxError("'->' must be followed by a folder, e.g. -> \"D:/out\".")
-    return Path(value).expanduser()
-
-
-def _read_inputs(text: str) -> list[Source]:
-    sources: list[Source] = []
+def _read_items(text: str) -> list[Source]:
+    items: list[Source] = []
     pos = 0
     while True:
         pos = _skip_space(text, pos)
         if pos >= len(text):
-            return sources
+            return items
         char = text[pos]
         if char in "\"'":
-            close = text.find(char, pos + 1)
-            if close < 0:
-                raise CommandSyntaxError(
-                    f"The path {_excerpt(text[pos:])} is missing its closing {char}."
-                )
-            raw = text[pos + 1 : close]
-            pos = close + 1
-            spec: str | None = None
-            after = _skip_space(text, pos)
-            if after < len(text) and text[after] == "[":
-                end = text.find("]", after)
-                if end < 0:
-                    raise CommandSyntaxError(f"\"{raw}\": the range is missing its closing ']'.")
-                spec = text[after + 1 : end]
-                pos = end + 1
-            if pos < len(text) and not text[pos].isspace():
-                raise CommandSyntaxError(
-                    f'Unexpected text right after "{raw}": {_excerpt(text[pos:])}. '
-                    "Separate inputs with a space."
-                )
+            raw, spec, pos = _read_quoted(text, pos)
         elif char == "[":
             raise CommandSyntaxError(
                 f"A range needs a file in front of it: {_excerpt(text[pos:])}."
@@ -254,20 +204,52 @@ def _read_inputs(text: str) -> list[Source]:
             raw, spec, pos = _read_bare(text, pos)
         if not raw.strip():
             raise CommandSyntaxError("A path is empty.")
-        sources.append(Source(Path(raw).expanduser(), spec))
+        items.append(Source(Path(raw).expanduser(), spec))
+
+
+def _read_quoted(text: str, pos: int) -> tuple[str, str | None, int]:
+    """Read ``"path"``, ``"path"[range]`` or ``"path[range]"`` at ``pos``."""
+    quote = text[pos]
+    close = text.find(quote, pos + 1)
+    if close < 0:
+        raise CommandSyntaxError(f"The path {_excerpt(text[pos:])} is missing its closing {quote}.")
+    raw = text[pos + 1 : close]
+    pos = close + 1
+    spec: str | None = None
+    after = _skip_space(text, pos)
+    if after < len(text) and text[after] == "[":
+        end = text.find("]", after)
+        if end < 0:
+            raise CommandSyntaxError(f"\"{raw}\": the range is missing its closing ']'.")
+        spec = text[after + 1 : end]
+        pos = end + 1
+    if pos < len(text) and not text[pos].isspace():
+        raise CommandSyntaxError(
+            f'Unexpected text right after "{raw}": {_excerpt(text[pos:])}. '
+            "Separate paths with a space."
+        )
+    if spec is None:
+        inside = _TRAILING_RANGE.fullmatch(raw)
+        if inside is not None and not _is_file(raw):
+            raw, spec = inside.group(1), inside.group(2)
+    return raw, spec, pos
 
 
 def _read_bare(text: str, pos: int) -> tuple[str, str | None, int]:
-    """Read one unquoted input starting at ``pos``: ``(path, spec, new_pos)``.
+    """Read one unquoted path, and its range if any: ``(path, spec, new_pos)``.
 
     Spaces are ambiguous here - ``C:/My Docs/a.pdf`` is one path, ``a.pdf
-    b.pdf`` is two - so where they appear the file system decides: an input
-    ends at the first space where the text so far is an existing file. Paths
-    that do not exist cannot be told apart that way, and fall back to the
-    first ``[range]`` (or, with no range, the first word) so the error that
-    follows names what was typed.
+    b.pdf`` is two - so where they appear the file system decides: a path
+    ends at the first space where the text so far is an existing file. Text
+    that names nothing that exists runs to its ``[range]``, or with no range,
+    to the next quoted path or the end - normally the output folder, which
+    need not exist yet.
     """
     rest = text[pos:]
+    quoted = _NEXT_QUOTED_WORD.search(rest)
+    if quoted is not None:
+        rest = rest[: quoted.start()]
+
     ranges = [match for match in _RANGE_AT_WORD_END.finditer(rest) if match.start() > 0]
     chosen = next((m for m in ranges if _is_file(rest[: m.start()])), None)
     if chosen is None and ranges:
@@ -281,13 +263,9 @@ def _read_bare(text: str, pos: int) -> tuple[str, str | None, int]:
     if chosen is not None:
         return rest[: chosen.start()], chosen.group(1), pos + chosen.end()
     whole = rest.rstrip()
-    if _is_file(whole):
-        return whole, None, pos + len(rest)
-    match = _NON_SPACE.match(rest)
-    token = match.group() if match else rest
-    if "[" in token and "]" not in token[token.index("[") :]:
-        raise CommandSyntaxError(f"'{token}': the range is missing its closing ']'.")
-    return token, None, pos + len(token)
+    if "[" in whole and "]" not in whole[whole.rindex("[") :]:
+        raise CommandSyntaxError(f"'{whole}': the range is missing its closing ']'.")
+    return whole, None, pos + len(rest)
 
 
 # -- PDF page ranges ----------------------------------------------------------

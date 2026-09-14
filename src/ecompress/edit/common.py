@@ -16,7 +16,7 @@ from ecompress.units import bytes_to_mb
 
 __all__ = ["EditResult", "check_sources", "reserve_output", "staged_output"]
 
-#: Extensions that clearly name a file. A ``-> target`` ending in one of
+#: Extensions that clearly name a file. An output path ending in one of
 #: these that the operation cannot write is an error, not a folder name.
 _FILE_EXTENSIONS = frozenset(
     {
@@ -86,9 +86,9 @@ def reserve_output(
 ) -> ReservedPath:
     """Choose and reserve where the result goes.
 
-    * no ``->``: next to the first input, ``<name><suffix><extension>``
-    * ``-> "folder"``: inside that folder (created if needed), same name
-    * ``-> "file.ext"``: exactly that file, if ``.ext`` is in ``writable``
+    * no output: next to the first input, ``<name><suffix><extension>``
+    * a folder: inside it (created if needed), same name
+    * ``file.ext``: exactly that file, if ``.ext`` is in ``writable``
 
     Existing files are never replaced unless ``overwrite`` is set for an
     explicit file, and an input is never replaced at all.

@@ -62,7 +62,7 @@ def test_cut_clock_format_into_output_folder(
 ) -> None:
     clip = copy_media(source_mp4)
     out = tmp_path / "exports"
-    result = execute(f'cut_video "{clip}"[00:00:01-00:03] -> "{out}"')
+    result = execute(f'cut_video "{clip}"[00:00:01-00:03] "{out}"')
     assert result.output_path == out / "clip_cut.mp4"
     assert_duration(result.output_path, 2.0)
 

@@ -1,16 +1,11 @@
 """The ``add_pdf``, ``cut_pdf``, ``add_video`` and ``cut_video`` commands::
 
-    cut_pdf "C:/My Documents/book.pdf"[2-5,8-12,20] -> "D:/out"
+    cut_pdf "C:/My Documents/book.pdf"[2-5,8-12,20] "D:/out"
 
-Shells get in the way of that line in two places, both verified by running
-it:
-
-* ``>`` in ``->`` is output redirection in PowerShell, cmd, bash and zsh. The
-  program receives a lone ``-`` while its output goes into a file, so a
-  trailing ``-`` is caught and answered with the way to type the arrow.
-* PowerShell parses ``"text"[2-9]`` as indexing into a string and fails before
-  the program starts; ``--%`` makes it pass the rest of the line untouched.
-  zsh treats ``[...]`` as a file pattern, which ``noglob`` switches off.
+That line works as typed in cmd and bash. PowerShell parses ``"text"[2-9]``
+as indexing into a string and fails before the program starts, and zsh treats
+``[...]`` as a file pattern; in both, ``"book.pdf[2-5]"`` - the range inside
+the quotes - arrives intact, and in PowerShell so does anything after ``--%``.
 
 The arguments are joined back into one line before parsing, so it does not
 matter how the shell split them or whether it removed the quotes.
@@ -19,7 +14,9 @@ matter how the shell split them or whether it removed the quotes.
 from __future__ import annotations
 
 import json
+import re
 import sys
+import textwrap
 from collections.abc import Sequence
 from typing import IO
 
@@ -57,27 +54,27 @@ _SUMMARY = {
     "cut_video": "Extract time ranges from a video into a new video.",
 }
 
-#: ``(arguments, what they do)``; the first one is used in the shell guide.
+#: ``(arguments, what they do)``; the first one is reused in the PowerShell hint.
 _EXAMPLES: dict[str, tuple[tuple[str, str], ...]] = {
     "add_pdf": (
-        ('"D:/a.pdf"[2-9] "D:/b.pdf"[7-16] -> "D:/out"', "pages 2-9 of a.pdf, then 7-16 of b.pdf"),
+        ('"D:/a.pdf"[2-9] "D:/b.pdf"[7-16] "D:/out"', "pages 2-9 of a.pdf, then 7-16 of b.pdf"),
         ('"a.pdf" "b.pdf"', "both whole files, saved next to a.pdf"),
         ('"a.pdf"[1-3] "a.pdf"[10-end]', "the same file twice"),
     ),
     "cut_pdf": (
-        ('"C:/My Documents/book.pdf"[2-5,8-12,20] -> "D:/out"', "pages 2-5, 8-12 and 20"),
+        ('"C:/My Documents/book.pdf"[2-5,8-12,20] "D:/out"', "pages 2-5, 8-12 and 20"),
         ('"book.pdf"[7-16]', "saved next to book.pdf"),
         ('"book.pdf"[10-1]', "pages 10 down to 1"),
     ),
     "add_video": (
         (
-            '"a.mp4"[00:00-00:30] "b.mp4"[01:10-02:00] -> "D:/out"',
+            '"a.mp4"[00:00-00:30] "b.mp4"[01:10-02:00] "D:/out"',
             "0:00-0:30 of a.mp4, then 1:10-2:00 of b.mp4",
         ),
         ('"a.mp4" "b.mp4"', "both whole files, saved next to a.mp4"),
     ),
     "cut_video": (
-        ('"movie.mp4"[00:02:10-00:05:30] -> "D:/out"', "from 2:10 to 5:30"),
+        ('"movie.mp4"[00:02:10-00:05:30] "D:/out"', "from 2:10 to 5:30"),
         ('"movie.mp4"[130-330]', "the same range in seconds, saved next to movie.mp4"),
         ('"movie.mp4"[00:10-00:20,01:00-end]', "two ranges, joined"),
     ),
@@ -93,35 +90,44 @@ _RANGES = {
 
 _FILE_TYPES = {"pdf": ".pdf", "video": ".mp4, .mkv, .mov, .webm or .avi"}
 
+_OUTPUT_RULE = {
+    "cut": "The last path, which has no [range], is where to save",
+    "add": "The last path, if it has no [range] and is not an existing file, is where to save",
+}
 
-def _shell_forms(operation: str) -> str:
-    """How to type the first example in each shell, arrow included."""
-    arguments = _EXAMPLES[operation][0][0]
-    inputs, _, target = arguments.partition(" -> ")
-    return (
-        f"  PowerShell   {operation} --% {arguments}\n"
-        f'  cmd          {operation} {inputs} "->" {target}\n'
-        f"  bash         {operation} {inputs} '->' {target}\n"
-        f"  zsh          noglob {operation} {inputs} '->' {target}\n"
+
+def _output_paragraph(verb: str, kind: str) -> str:
+    return textwrap.fill(
+        f"{_OUTPUT_RULE[verb]}: a folder (created if needed) or a file name ending in "
+        f"{_FILE_TYPES[kind]}. Leave it out to save next to the first input. "
+        "An existing file is never replaced.",
+        width=78,
     )
 
 
+def _powershell_forms(operation: str) -> str:
+    """The first example with the range moved inside the quotes, and with ``--%``."""
+    arguments = _EXAMPLES[operation][0][0]
+    inside = re.sub(r'"([^"]*)"\[([^\]]*)\]', r'"\1[\2]"', arguments)
+    return f"  {operation} {inside}\n  {operation} --% {arguments}\n"
+
+
 def _help(operation: str) -> str:
-    kind = operation.split("_", 1)[1]
+    verb, kind = operation.split("_", 1)
     examples = "\n".join(
         f"  {operation} {arguments}\n      {meaning}" for arguments, meaning in _EXAMPLES[operation]
     )
     options = """\
   -q, --quiet     only print the output path
   --json          print the result as JSON
-  --overwrite     allow -> "file.ext" to replace an existing file"""
+  --overwrite     allow a file name at the end to replace an existing file"""
     if operation == "cut_video":
         options += (
             "\n  --copy          cut without re-encoding: instant and lossless, but"
             "\n                  the cut snaps to a keyframe (one range only)"
         )
     return f"""\
-usage: {operation} "PATH"[RANGE] ... [-> "FOLDER"]
+usage: {operation} "PATH"[RANGE] ... ["FOLDER"]
 
 {_SUMMARY[operation]}
 
@@ -130,13 +136,12 @@ examples:
 
 {_RANGES[kind]}
 
--> "FOLDER" is optional. Without it the result is saved next to the first
-input under a new name, and an existing file is never replaced. FOLDER is
-created if needed; it may also be a file name ending in {_FILE_TYPES[kind]}.
+{_output_paragraph(verb, kind)}
 
-In a shell, the > in -> means "write output to a file", and PowerShell and
-zsh read [ ] themselves. Type the command like this:
-{_shell_forms(operation)}
+PowerShell reads "file"[range] itself, and zsh reads [ ] as a file pattern.
+There, put the range inside the quotes - that works in every shell - or, in
+PowerShell, add --% after the command:
+{_powershell_forms(operation)}
 options:
 {options}
 """
@@ -183,14 +188,6 @@ def _main(operation: str, argv: Sequence[str] | None) -> int:
         return EXIT_USAGE
     if not words:
         err.write(f"Error: no command given.\n\n{_help(operation)}")
-        return EXIT_USAGE
-    if words[-1] == "-":
-        err.write(
-            f"Error: the output folder never reached {operation}. Your shell read the '>' "
-            "in '->' as 'write output to a file' (and may have created a file with the "
-            "folder's name). Nothing was done.\n"
-            f"Type the arrow so the shell leaves it alone:\n{_shell_forms(operation)}"
-        )
         return EXIT_USAGE
     if "--copy" in flags and operation != "cut_video":
         err.write(f"Error: --copy only applies to cut_video.\n{usage}\n")

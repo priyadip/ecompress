@@ -63,7 +63,7 @@ def test_add_from_command_text_with_spaces_and_new_folder(tmp_path: Path) -> Non
     second = make_pdf(folder / "b file.pdf", 5, base=500)
     out = tmp_path / "out dir" / "nested"
 
-    result = execute(f'add_pdf "{first}"[2-4] "{second}"[1-2] -> "{out}"')
+    result = execute(f'add_pdf "{first}"[2-4] "{second}"[1-2] "{out}"')
 
     assert result.output_path == out / "a_merged.pdf"
     assert page_ids(result.output_path) == [102, 103, 104, 501, 502]
