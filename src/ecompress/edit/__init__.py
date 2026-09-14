@@ -2,16 +2,16 @@
 
 ::
 
-    add_pdf   pdf1("a.pdf")[2-9] pdf2("b.pdf")[7-16] -> output("D:/out")
-    cut_pdf   pdf("book.pdf")[2-5,8-12,20]
-    add_video video1("a.mp4")[00:00-00:30] video2("b.mp4")[01:10-02:00]
-    cut_video video("movie.mp4")[00:02:10-00:05:30] -> output("D:/out")
+    add_pdf   "D:/a.pdf"[2-9] "D:/b.pdf"[7-16] -> "D:/out"
+    cut_pdf   "C:/My Documents/book.pdf"[2-5,8-12,20] -> "D:/out"
+    add_video "a.mp4"[00:00-00:30] "b.mp4"[01:10-02:00] -> "D:/out"
+    cut_video "movie.mp4"[00:02:10-00:05:30]
 
 Python usage::
 
     from ecompress import execute, cut_pdf, add_video
 
-    execute('cut_pdf pdf("book.pdf")[7-16]')
+    execute('cut_pdf "book.pdf"[7-16] -> "D:/out"')
     cut_pdf("book.pdf", "2-5,8-12,20", output="D:/out")
     add_video([("a.mp4", "00:00-00:30"), ("b.mp4", "01:10-02:00")])
 """
@@ -27,6 +27,7 @@ from ecompress.edit.common import EditResult
 from ecompress.edit.grammar import OPERATIONS, Command, Source, parse_command
 from ecompress.edit.pdf import run_pdf
 from ecompress.edit.video import run_video
+from ecompress.errors import CommandSyntaxError
 from ecompress.reporting import Reporter
 
 __all__ = [
@@ -59,12 +60,12 @@ def execute(
     reporter: Reporter | None = None,
     timeout: float | None = None,
 ) -> EditResult:
-    """Parse and run a command such as ``'cut_pdf pdf("book.pdf")[7-16]'``.
+    """Parse and run a command such as ``'cut_pdf "book.pdf"[7-16] -> "D:/out"'``.
 
     Args:
         command: the command text. The operation word may be left out if
             ``operation`` is given.
-        overwrite: allow an explicit ``output("file.ext")`` to replace a file.
+        overwrite: allow an explicit ``-> "file.ext"`` to replace a file.
         copy: ``cut_video`` only - cut without re-encoding (instant, lossless,
             keyframe-aligned).
         reporter: receives progress; silent by default.
@@ -85,8 +86,6 @@ def run(
     """Run an already-parsed :class:`Command`."""
     if command.kind == "pdf":
         if copy:
-            from ecompress.errors import CommandSyntaxError
-
             raise CommandSyntaxError("--copy only applies to cut_video.")
         return run_pdf(command, overwrite=overwrite, reporter=reporter)
     return run_video(command, overwrite=overwrite, copy=copy, reporter=reporter, timeout=timeout)
@@ -101,7 +100,7 @@ def cut_pdf(
     reporter: Reporter | None = None,
 ) -> EditResult:
     """Extract ``pages`` (e.g. ``"7-16"`` or ``"2-5,8-12,20"``) into a new PDF."""
-    command = Command("cut_pdf", (Source("pdf", Path(path), str(pages)),), _optional_path(output))
+    command = Command("cut_pdf", (Source(Path(path), str(pages)),), _optional_path(output))
     return run_pdf(command, overwrite=overwrite, reporter=reporter)
 
 
@@ -113,7 +112,7 @@ def add_pdf(
     reporter: Reporter | None = None,
 ) -> EditResult:
     """Merge PDFs, or chosen pages of them, in order."""
-    command = Command("add_pdf", _sources("pdf", parts), _optional_path(output))
+    command = Command("add_pdf", _sources(parts), _optional_path(output))
     return run_pdf(command, overwrite=overwrite, reporter=reporter)
 
 
@@ -128,9 +127,7 @@ def cut_video(
     timeout: float | None = None,
 ) -> EditResult:
     """Extract ``ranges`` (``"00:02:10-00:05:30"``, ``"130-330"`` or ``(130, 330)``)."""
-    command = Command(
-        "cut_video", (Source("video", Path(path), _spec(ranges)),), _optional_path(output)
-    )
+    command = Command("cut_video", (Source(Path(path), _spec(ranges)),), _optional_path(output))
     return run_video(command, overwrite=overwrite, copy=copy, reporter=reporter, timeout=timeout)
 
 
@@ -143,18 +140,18 @@ def add_video(
     timeout: float | None = None,
 ) -> EditResult:
     """Join videos, or chosen time ranges of them, in order."""
-    command = Command("add_video", _sources("video", parts), _optional_path(output))
+    command = Command("add_video", _sources(parts), _optional_path(output))
     return run_video(command, overwrite=overwrite, reporter=reporter, timeout=timeout)
 
 
-def _sources(kind: str, parts: Sequence[Part]) -> tuple[Source, ...]:
+def _sources(parts: Sequence[Part]) -> tuple[Source, ...]:
     sources: list[Source] = []
-    for number, part in enumerate(parts, start=1):
+    for part in parts:
         if isinstance(part, tuple):
             path, spec = part
-            sources.append(Source(f"{kind}{number}", Path(path), _spec(spec)))
+            sources.append(Source(Path(path), _spec(spec)))
         else:
-            sources.append(Source(f"{kind}{number}", Path(part)))
+            sources.append(Source(Path(part)))
     return tuple(sources)
 
 

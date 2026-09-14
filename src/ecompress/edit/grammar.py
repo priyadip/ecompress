@@ -2,20 +2,20 @@
 
 One grammar for every operation::
 
-    <operation> <label>(<path>)[<range>] ... -> output(<folder or file>)
+    <operation> "<path>"[<range>] ... -> "<folder or file>"
 
-    add_pdf   pdf1("a.pdf")[2-9] pdf2("b.pdf")[7-16] -> output("D:/out")
-    cut_pdf   pdf("book.pdf")[2-5,8-12,20]
-    add_video video1("a.mp4")[00:10-01:20] video2("b.mp4")[02:00-03:30]
-    cut_video video("movie.mp4")[01:20-05:40]
+    add_pdf   "D:/a.pdf"[2-9] "D:/b.pdf"[7-16] -> "D:/out"
+    cut_pdf   "C:/My Documents/book.pdf"[2-5,8-12,20] -> "D:/out"
+    add_video "a.mp4"[00:00-00:30] "b.mp4"[01:10-02:00] -> "D:/out"
+    cut_video "movie.mp4"[00:02:10-00:05:30]
 
-Paths may be quoted with ``"`` or ``'``. Unquoted paths are accepted too,
-because Windows PowerShell 5.1 strips embedded double quotes from arguments
-before a program ever sees them; quoting is only *needed* when a path contains
-``)`` followed by something that looks like the next part of the command.
-
-Ranges are typed by people (or written by an LLM), so every error names the
-offending text and says what was expected.
+``-> "folder"`` is optional, and so are the quotes around paths - which
+matters, because shells remove them before a program sees its arguments:
+bash hands over ``D:/My Docs/a.pdf[2-9]``, and Windows PowerShell 5.1 can even
+split one argument at its spaces. The console scripts therefore join their
+arguments back into one line, and an unquoted path is read up to its
+``[range]`` - or, for an input without a range, up to where it names a file
+that exists.
 """
 
 from __future__ import annotations
@@ -45,26 +45,23 @@ OPERATIONS = ("add_pdf", "cut_pdf", "add_video", "cut_video")
 #: containers round durations, and people round timestamps.
 END_TOLERANCE_SECONDS = 0.5
 
-_EXAMPLES = {
-    "add_pdf": 'add_pdf pdf1("a.pdf")[2-9] pdf2("b.pdf")[7-16] -> output("folder")',
-    "cut_pdf": 'cut_pdf pdf("book.pdf")[7-16] -> output("folder")',
-    "add_video": 'add_video video1("a.mp4")[00:00-00:30] video2("b.mp4")[01:10-02:00]',
-    "cut_video": 'cut_video video("movie.mp4")[00:02:10-00:05:30] -> output("folder")',
+EXAMPLES = {
+    "add_pdf": 'add_pdf "D:/a.pdf"[2-9] "D:/b.pdf"[7-16] -> "D:/out"',
+    "cut_pdf": 'cut_pdf "C:/My Documents/book.pdf"[2-5,8-12,20] -> "D:/out"',
+    "add_video": 'add_video "a.mp4"[00:00-00:30] "b.mp4"[01:10-02:00] -> "D:/out"',
+    "cut_video": 'cut_video "movie.mp4"[00:02:10-00:05:30] -> "D:/out"',
 }
 
-_WORD = re.compile(r"\s*([A-Za-z_]\w*)")
-_LABEL = re.compile(r"\s*([A-Za-z_]\w*)\s*\(")
-# Where an unquoted path ends: a ")" followed by a range, the arrow, the end of
-# the command, or the next label.
-_UNQUOTED_END = re.compile(r"\)(?=\s*(?:\[|->|$)|\s+[A-Za-z_]\w*\s*\()")
-_LABEL_KIND = re.compile(r"(pdf|video)\d*")
+_OPERATION_WORD = re.compile(r"\s*([A-Za-z_]\w*)(?=\s|$)")
+# A [range] closing an unquoted input: followed by whitespace or the end.
+_RANGE_AT_WORD_END = re.compile(r"\[([^\[\]]*)\](?=\s|$)")
+_NON_SPACE = re.compile(r"\S+")
 
 
 @dataclass(frozen=True)
 class Source:
-    """One input: ``label(path)[spec]``. ``spec`` is ``None`` when no range was given."""
+    """One input. ``spec`` is the text inside ``[...]``, or ``None`` without one."""
 
-    label: str
     path: Path
     spec: str | None = None
 
@@ -79,24 +76,15 @@ class Command:
 
     def __post_init__(self) -> None:
         if self.operation not in OPERATIONS:
-            raise CommandSyntaxError(
-                f"Unknown operation '{self.operation}'. Expected one of: {', '.join(OPERATIONS)}."
-            )
+            raise CommandSyntaxError(_unknown(self.operation))
         verb, kind = self.operation.split("_", 1)
-        example = _EXAMPLES[self.operation]
+        example = EXAMPLES[self.operation]
         if not self.sources:
-            raise CommandSyntaxError(f"No input given. Example:\n  {example}")
-        for source in self.sources:
-            match = _LABEL_KIND.fullmatch(source.label.lower())
-            if match is None or match.group(1) != kind:
-                raise CommandSyntaxError(
-                    f"{self.operation} takes {kind}(...) inputs, not {source.label}(...). "
-                    f"Example:\n  {example}"
-                )
+            raise CommandSyntaxError(f"No input file given. Example:\n  {example}")
         if verb == "cut":
             if len(self.sources) != 1:
                 raise CommandSyntaxError(
-                    f"{self.operation} takes exactly one {kind}; "
+                    f"{self.operation} takes exactly one file; "
                     f"use add_{kind} to combine several. Example:\n  {example}"
                 )
             if self.sources[0].spec is None:
@@ -105,7 +93,7 @@ class Command:
                 )
         elif len(self.sources) < 2:
             raise CommandSyntaxError(
-                f"add_{kind} combines two or more inputs; to take part of one "
+                f"add_{kind} combines two or more files; to take part of one "
                 f"use cut_{kind}. Example:\n  {example}"
             )
 
@@ -123,81 +111,37 @@ def parse_command(text: str, *, operation: str | None = None) -> Command:
     with an operation it must agree.
     """
     if operation is not None and operation not in OPERATIONS:
-        raise CommandSyntaxError(
-            f"Unknown operation '{operation}'. Expected one of: {', '.join(OPERATIONS)}."
-        )
+        raise CommandSyntaxError(_unknown(operation))
     text = text.strip()
     if not text:
-        example = _EXAMPLES[operation] if operation else _EXAMPLES["cut_pdf"]
-        raise CommandSyntaxError(f"The command is empty. Example:\n  {example}")
+        raise CommandSyntaxError(
+            f"The command is empty. Example:\n  {EXAMPLES[operation or 'cut_pdf']}"
+        )
 
     pos = 0
-    word = _WORD.match(text)
-    if word is not None and not text[word.end() :].lstrip().startswith("("):
-        name = word.group(1)
-        if name not in OPERATIONS:
+    word = _OPERATION_WORD.match(text)
+    if word is not None and word.group(1) in OPERATIONS:
+        if operation is not None and word.group(1) != operation:
             raise CommandSyntaxError(
-                f"Unknown operation '{name}'. Expected one of: {', '.join(OPERATIONS)}."
+                f"This is the {operation} command, but the text says {word.group(1)}."
             )
-        if operation is not None and name != operation:
-            raise CommandSyntaxError(f"This is the {operation} command, but the text says {name}.")
-        operation = name
+        operation = word.group(1)
         pos = word.end()
     if operation is None:
+        if word is not None:
+            raise CommandSyntaxError(_unknown(word.group(1)))
         raise CommandSyntaxError(
             "The command must start with an operation: " + ", ".join(OPERATIONS) + "."
         )
 
-    sources: list[Source] = []
-    output: Path | None = None
-    arrow = False
-    while True:
-        pos = _skip_space(text, pos)
-        if pos >= len(text):
-            break
-        if output is not None:
-            raise CommandSyntaxError(
-                f"Nothing may follow output(...), found: {_excerpt(text, pos)}"
-            )
-        if text.startswith("->", pos):
-            if arrow:
-                raise CommandSyntaxError("'->' appears more than once.")
-            arrow = True
-            pos += 2
-            continue
-
-        label_match = _LABEL.match(text, pos)
-        if label_match is None:
-            raise CommandSyntaxError(
-                f'Expected something like {operation.split("_")[1]}("path")[range] '
-                f"at: {_excerpt(text, pos)}\nExample:\n  {_EXAMPLES[operation]}"
-            )
-        label = label_match.group(1)
-        path, pos = _read_path(text, label_match.end(), label)
-
-        spec: str | None = None
-        after = _skip_space(text, pos)
-        if after < len(text) and text[after] == "[":
-            close = text.find("]", after)
-            if close < 0:
-                raise CommandSyntaxError(f"{label}(...): the range is missing its closing ']'.")
-            spec = text[after + 1 : close]
-            pos = close + 1
-
-        if label.lower() == "output":
-            if spec is not None:
-                raise CommandSyntaxError("output(...) takes a folder or file, not a [range].")
-            output = path
-        else:
-            if arrow:
-                raise CommandSyntaxError(
-                    f"Inputs must come before '->'; found {label}(...) after it."
-                )
-            sources.append(Source(label, path, spec))
-
-    if arrow and output is None:
-        raise CommandSyntaxError("'->' must be followed by output(\"folder\").")
+    inputs, target = _split_arrow(text, pos)
+    sources = _read_inputs(inputs)
+    output = None if target is None else _read_output(target)
     return Command(operation, tuple(sources), output)
+
+
+def _unknown(name: str) -> str:
+    return f"Unknown operation '{name}'. Expected one of: {', '.join(OPERATIONS)}."
 
 
 def _skip_space(text: str, pos: int) -> int:
@@ -206,33 +150,144 @@ def _skip_space(text: str, pos: int) -> int:
     return pos
 
 
-def _excerpt(text: str, pos: int) -> str:
-    rest = text[pos:]
-    return repr(rest if len(rest) <= 40 else rest[:40] + "...")
+def _excerpt(text: str) -> str:
+    return repr(text if len(text) <= 40 else text[:40] + "...")
 
 
-def _read_path(text: str, pos: int, label: str) -> tuple[Path, int]:
-    """Read the path inside ``label(...)``; ``pos`` is just after the ``(``."""
-    pos = _skip_space(text, pos)
-    if pos < len(text) and text[pos] in "\"'":
-        quote = text[pos]
-        close = text.find(quote, pos + 1)
+def _is_file(text: str) -> bool:
+    try:
+        return Path(text).expanduser().is_file()
+    except (OSError, ValueError):
+        return False
+
+
+def _split_arrow(text: str, pos: int) -> tuple[str, str | None]:
+    """Split at the ``->`` that is not inside quotes or a range.
+
+    A quote only opens at the start of a word, so the apostrophe in an
+    unquoted ``Tom's video.mp4`` is just a character. ``->`` must start a
+    word or follow ``]`` or a closing quote, so ``a->b.pdf`` is a file name.
+    """
+    arrow: int | None = None
+    quote: str | None = None
+    in_range = False
+    index = pos
+    while index < len(text):
+        char = text[index]
+        starts_word = index == pos or text[index - 1].isspace()
+        if quote is not None:
+            if char == quote:
+                quote = None
+        elif char in "\"'" and starts_word:
+            quote = char
+        elif char == "[":
+            in_range = True
+        elif char == "]":
+            in_range = False
+        elif (
+            not in_range
+            and text.startswith("->", index)
+            and (starts_word or text[index - 1] in "]\"'")
+        ):
+            if arrow is not None:
+                raise CommandSyntaxError("'->' appears more than once.")
+            arrow = index
+            index += 2
+            continue
+        index += 1
+    if arrow is None:
+        return text[pos:], None
+    return text[pos:arrow], text[arrow + 2 :]
+
+
+def _read_output(target: str) -> Path:
+    value = target.strip()
+    if value[:1] in {'"', "'"}:
+        close = value.find(value[0], 1)
         if close < 0:
-            raise CommandSyntaxError(f"{label}(...): the path is missing its closing {quote}.")
-        raw = text[pos + 1 : close]
-        end = _skip_space(text, close + 1)
-        if end >= len(text) or text[end] != ")":
-            raise CommandSyntaxError(f"{label}(...): expected ')' after the quoted path.")
-        end += 1
-    else:
-        match = _UNQUOTED_END.search(text, pos)
-        if match is None:
-            raise CommandSyntaxError(f"{label}(...): missing ')' after the path.")
-        raw = text[pos : match.start()].strip()
-        end = match.end()
-    if not raw.strip():
-        raise CommandSyntaxError(f"{label}(): the path is empty.")
-    return Path(raw).expanduser(), end
+            raise CommandSyntaxError(f"The output folder is missing its closing {value[0]}.")
+        rest = value[close + 1 :].strip()
+        if rest:
+            raise CommandSyntaxError(
+                f"Nothing may follow the output folder; found {_excerpt(rest)}."
+            )
+        value = value[1:close]
+    if not value.strip():
+        raise CommandSyntaxError("'->' must be followed by a folder, e.g. -> \"D:/out\".")
+    return Path(value).expanduser()
+
+
+def _read_inputs(text: str) -> list[Source]:
+    sources: list[Source] = []
+    pos = 0
+    while True:
+        pos = _skip_space(text, pos)
+        if pos >= len(text):
+            return sources
+        char = text[pos]
+        if char in "\"'":
+            close = text.find(char, pos + 1)
+            if close < 0:
+                raise CommandSyntaxError(
+                    f"The path {_excerpt(text[pos:])} is missing its closing {char}."
+                )
+            raw = text[pos + 1 : close]
+            pos = close + 1
+            spec: str | None = None
+            after = _skip_space(text, pos)
+            if after < len(text) and text[after] == "[":
+                end = text.find("]", after)
+                if end < 0:
+                    raise CommandSyntaxError(f"\"{raw}\": the range is missing its closing ']'.")
+                spec = text[after + 1 : end]
+                pos = end + 1
+            if pos < len(text) and not text[pos].isspace():
+                raise CommandSyntaxError(
+                    f'Unexpected text right after "{raw}": {_excerpt(text[pos:])}. '
+                    "Separate inputs with a space."
+                )
+        elif char == "[":
+            raise CommandSyntaxError(
+                f"A range needs a file in front of it: {_excerpt(text[pos:])}."
+            )
+        else:
+            raw, spec, pos = _read_bare(text, pos)
+        if not raw.strip():
+            raise CommandSyntaxError("A path is empty.")
+        sources.append(Source(Path(raw).expanduser(), spec))
+
+
+def _read_bare(text: str, pos: int) -> tuple[str, str | None, int]:
+    """Read one unquoted input starting at ``pos``: ``(path, spec, new_pos)``.
+
+    Spaces are ambiguous here - ``C:/My Docs/a.pdf`` is one path, ``a.pdf
+    b.pdf`` is two - so where they appear the file system decides: an input
+    ends at the first space where the text so far is an existing file. Paths
+    that do not exist cannot be told apart that way, and fall back to the
+    first ``[range]`` (or, with no range, the first word) so the error that
+    follows names what was typed.
+    """
+    rest = text[pos:]
+    ranges = [match for match in _RANGE_AT_WORD_END.finditer(rest) if match.start() > 0]
+    chosen = next((m for m in ranges if _is_file(rest[: m.start()])), None)
+    if chosen is None and ranges:
+        chosen = ranges[0]
+
+    path_end = chosen.start() if chosen is not None else len(rest)
+    for index in range(path_end):
+        if rest[index].isspace() and _is_file(rest[:index]):
+            return rest[:index], None, pos + index
+
+    if chosen is not None:
+        return rest[: chosen.start()], chosen.group(1), pos + chosen.end()
+    whole = rest.rstrip()
+    if _is_file(whole):
+        return whole, None, pos + len(rest)
+    match = _NON_SPACE.match(rest)
+    token = match.group() if match else rest
+    if "[" in token and "]" not in token[token.index("[") :]:
+        raise CommandSyntaxError(f"'{token}': the range is missing its closing ']'.")
+    return token, None, pos + len(token)
 
 
 # -- PDF page ranges ----------------------------------------------------------

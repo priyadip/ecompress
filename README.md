@@ -371,17 +371,14 @@ them exactly.
 
 ## Cut and combine PDFs and videos
 
-Four more commands share one small grammar:
+Four more commands share one grammar — a file, a range in brackets, and
+optionally where to save:
 
 ```text
-<operation> <label>("<path>")[<range>] ... -> output("<folder>")
-```
-
-```bash
-add_pdf   'pdf1("D:/a.pdf")[2-9] pdf2("D:/b.pdf")[7-16] -> output("D:/out")'
-cut_pdf   'pdf("C:/My Documents/book.pdf")[2-5,8-12,20]'
-add_video 'video1("a.mp4")[00:00-00:30] video2("b.mp4")[01:10-02:00] -> output("D:/out")'
-cut_video 'video("movie.mp4")[00:02:10-00:05:30]'
+add_pdf   "D:/a.pdf"[2-9] "D:/b.pdf"[7-16] -> "D:/out"
+cut_pdf   "C:/My Documents/book.pdf"[2-5,8-12,20] -> "D:/out"
+add_video "a.mp4"[00:00-00:30] "b.mp4"[01:10-02:00] -> "D:/out"
+cut_video "movie.mp4"[00:02:10-00:05:30] -> "D:/out"
 ```
 
 | Operation   | Does                                        | Output name          |
@@ -391,10 +388,30 @@ cut_video 'video("movie.mp4")[00:02:10-00:05:30]'
 | `add_video` | time ranges from two or more videos, joined | `a_joined.mp4`       |
 | `cut_video` | time ranges from one video                  | `movie_cut.mp4`      |
 
-**Quote the whole command.** `(`, `[` and `>` are special characters in bash,
-PowerShell and cmd — unquoted, `->` would redirect output into a file. Single
-quotes work everywhere. Paths inside may be quoted or not; the commands also
-cope with Windows PowerShell 5.1, which strips the inner quotes.
+**`-> "D:/out"` is optional.** Without it the result is saved in the same
+folder as the (first) input under a new name — `book_pages_7-16.pdf`, or
+`book_pages_7-16_1.pdf` if that is taken. An existing file is never replaced.
+
+**Typing it in a terminal.** Shells claim some of these characters before the
+command runs: the `>` in `->` means "write output to a file" in every shell,
+PowerShell reads `"book.pdf"[2-9]` as indexing into a string, and zsh treats
+`[...]` as a file pattern. So type it like this:
+
+| Shell         | Command                                                              |
+| ------------- | -------------------------------------------------------------------- |
+| PowerShell    | `cut_pdf --% "C:/My Documents/book.pdf"[2-5,8-12,20] -> "D:/out"`    |
+| cmd           | `cut_pdf "C:/My Documents/book.pdf"[2-5,8-12,20] "->" "D:/out"`      |
+| bash          | `cut_pdf "C:/My Documents/book.pdf"[2-5,8-12,20] '->' "D:/out"`      |
+| zsh (macOS)   | `noglob cut_pdf "book.pdf"[2-5,8-12,20] '->' "D:/out"`               |
+
+`--%` makes PowerShell pass the rest of the line through untouched. Without
+`->`, cmd and bash need nothing extra. If a shell does swallow the arrow, the
+command notices and stops with these instructions instead of doing anything.
+Scripts and LLM agents that start the command from an argument list, and
+`execute()` in Python, take the line exactly as written.
+
+Quotes around paths are optional; they are only needed for a file without a
+range whose path contains spaces and does not exist yet.
 
 **Ranges**
 
@@ -404,10 +421,10 @@ cope with Windows PowerShell 5.1, which strips the inner quotes.
 - Times: `130` (seconds), `02:10`, `00:02:10`, `1:02:03.5`. Ranges are
   `start-end` or `01:20-end`; several may be joined with commas.
 
-**Output.** Without `output(...)` the result goes next to the first input. A
-folder is created if needed; a path ending in `.pdf` / `.mp4` / `.mkv` /
-`.mov` / `.webm` / `.avi` names the file exactly (`--overwrite` to replace
-one). Existing files are never replaced otherwise, and an input never is.
+**Output.** The folder after `->` is created if needed. A target ending in
+`.pdf` / `.mp4` / `.mkv` / `.mov` / `.webm` / `.avi` names the file exactly
+(`--overwrite` to replace one). Existing files are never replaced otherwise,
+and an input never is.
 
 **What happens to quality**
 
@@ -430,7 +447,7 @@ From Python:
 ```python
 from ecompress import add_pdf, add_video, cut_pdf, cut_video, execute
 
-execute('cut_pdf pdf("book.pdf")[7-16] -> output("D:/out")')
+execute('cut_pdf "book.pdf"[7-16] -> "D:/out"')
 
 cut_pdf("book.pdf", "2-5,8-12,20")
 add_pdf([("a.pdf", "2-9"), ("b.pdf", "7-16")], output="D:/out")

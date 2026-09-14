@@ -14,11 +14,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   only has to learn it once:
 
   ```text
-  add_pdf   'pdf1("a.pdf")[2-9] pdf2("b.pdf")[7-16] -> output("D:/out")'
-  cut_pdf   'pdf("book.pdf")[2-5,8-12,20]'
-  add_video 'video1("a.mp4")[00:00-00:30] video2("b.mp4")[01:10-02:00]'
-  cut_video 'video("movie.mp4")[00:02:10-00:05:30]'
+  add_pdf   "D:/a.pdf"[2-9] "D:/b.pdf"[7-16] -> "D:/out"
+  cut_pdf   "C:/My Documents/book.pdf"[2-5,8-12,20] -> "D:/out"
+  add_video "a.mp4"[00:00-00:30] "b.mp4"[01:10-02:00] -> "D:/out"
+  cut_video "movie.mp4"[00:02:10-00:05:30]
   ```
+
+  `-> "folder"` is optional; without it the result is saved beside the input
+  under a new name, never replacing a file.
 
   The same operations are available from Python as `execute()`, `cut_pdf()`,
   `add_pdf()`, `cut_video()` and `add_video()`, returning an `EditResult`.
@@ -35,9 +38,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Notes
 
-- The commands take the whole expression in quotes: `(`, `[` and `>` are
-  special to every shell. Windows PowerShell 5.1 strips embedded double quotes
-  from arguments, so unquoted paths inside the expression are accepted too.
+- Shells claim part of that line: `>` in `->` is output redirection
+  everywhere, PowerShell reads `"x"[2-9]` as string indexing, and zsh globs
+  `[...]`. Typed, the arrow becomes `--% ... ->` in PowerShell, `"->"` in cmd
+  and `'->'` in bash, with `noglob` in zsh. A swallowed arrow is detected and
+  answered with those forms before anything runs. Quotes around paths are
+  optional, because shells strip them anyway.
 - Probing now reads a video's display rotation, so portrait phone footage keeps
   its orientation when joined with other clips.
 

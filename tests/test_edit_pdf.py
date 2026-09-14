@@ -63,7 +63,7 @@ def test_add_from_command_text_with_spaces_and_new_folder(tmp_path: Path) -> Non
     second = make_pdf(folder / "b file.pdf", 5, base=500)
     out = tmp_path / "out dir" / "nested"
 
-    result = execute(f'add_pdf pdf1("{first}")[2-4] pdf2("{second}")[1-2] -> output("{out}")')
+    result = execute(f'add_pdf "{first}"[2-4] "{second}"[1-2] -> "{out}"')
 
     assert result.output_path == out / "a_merged.pdf"
     assert page_ids(result.output_path) == [102, 103, 104, 501, 502]
@@ -147,7 +147,7 @@ def test_unusable_inputs(tmp_path: Path, setup: str, message: str) -> None:
 def test_copy_flag_is_rejected_for_pdf(tmp_path: Path) -> None:
     book = make_pdf(tmp_path / "book.pdf", 3)
     with pytest.raises(CommandSyntaxError, match="--copy only applies to cut_video"):
-        execute(f'cut_pdf pdf("{book}")[1]', copy=True)
+        execute(f'cut_pdf "{book}"[1]', copy=True)
 
 
 def test_long_page_lists_get_a_short_name(tmp_path: Path) -> None:
