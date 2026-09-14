@@ -256,6 +256,17 @@ class StreamInfo:
     frame_rate: float | None = None
     disposition: dict[str, int] = field(default_factory=dict)
     nb_frames: int | None = None
+    #: Display rotation in degrees. Phones store portrait video as landscape
+    #: frames plus this flag, and FFmpeg applies it when decoding.
+    rotation: int = 0
+
+    @property
+    def display_size(self) -> tuple[int, int]:
+        """``(width, height)`` as the video is shown, after rotation."""
+        width, height = self.width or 0, self.height or 0
+        if self.rotation % 180:
+            return height, width
+        return width, height
 
     @property
     def is_attached_picture(self) -> bool:
@@ -340,6 +351,15 @@ def _parse_rate(value: Any) -> float | None:
     return _as_float(value)
 
 
+def _rotation(stream: dict[str, Any]) -> int:
+    """Rotation from the display matrix (current FFmpeg) or the legacy ``rotate`` tag."""
+    for side_data in stream.get("side_data_list") or []:
+        if isinstance(side_data, dict) and "rotation" in side_data:
+            return (_as_int(side_data.get("rotation")) or 0) % 360
+    tags = stream.get("tags") or {}
+    return (_as_int(tags.get("rotate")) or 0) % 360
+
+
 def probe(path: Path, *, timeout: float = 120.0) -> MediaInfo:
     """Inspect a media file with ``ffprobe``.
 
@@ -386,6 +406,7 @@ def probe(path: Path, *, timeout: float = 120.0) -> MediaInfo:
                 or _parse_rate(raw.get("r_frame_rate")),
                 disposition=dict(raw.get("disposition") or {}),
                 nb_frames=_as_int(raw.get("nb_frames")),
+                rotation=_rotation(raw),
             )
         )
 

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ecompress"
-version = "2.4.0"
+version = "2.5.0"
 description = "Compress any file below a target size in MB with one simple command."
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -76,6 +76,10 @@ Changelog = "https://github.com/priyadip/compress-cli/blob/main/CHANGELOG.md"
 
 [project.scripts]
 ecompress = "ecompress.cli:main"
+add_pdf = "ecompress.edit.cli:main_add_pdf"
+cut_pdf = "ecompress.edit.cli:main_cut_pdf"
+add_video = "ecompress.edit.cli:main_add_video"
+cut_video = "ecompress.edit.cli:main_cut_video"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/ecompress"]

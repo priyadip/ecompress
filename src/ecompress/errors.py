@@ -11,6 +11,7 @@ from pathlib import Path
 from ecompress.units import format_size
 
 __all__ = [
+    "CommandSyntaxError",
     "CompressError",
     "InputFileError",
     "InvalidTargetError",
@@ -28,6 +29,10 @@ class CompressError(Exception):
 
 class InputFileError(CompressError):
     """The input path is missing, unreadable, empty or not a file."""
+
+
+class CommandSyntaxError(CompressError):
+    """An editing command (``cut_pdf``, ``add_video``, ...) could not be understood."""
 
 
 class InvalidTargetError(CompressError):

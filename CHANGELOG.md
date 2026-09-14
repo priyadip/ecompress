@@ -5,6 +5,42 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.5.0] - 2026-09-14
+
+### Added
+
+- **Cut and combine PDFs and videos.** Four commands - `add_pdf`, `cut_pdf`,
+  `add_video`, `cut_video` - share one grammar, so a person or an LLM agent
+  only has to learn it once:
+
+  ```text
+  add_pdf   'pdf1("a.pdf")[2-9] pdf2("b.pdf")[7-16] -> output("D:/out")'
+  cut_pdf   'pdf("book.pdf")[2-5,8-12,20]'
+  add_video 'video1("a.mp4")[00:00-00:30] video2("b.mp4")[01:10-02:00]'
+  cut_video 'video("movie.mp4")[00:02:10-00:05:30]'
+  ```
+
+  The same operations are available from Python as `execute()`, `cut_pdf()`,
+  `add_pdf()`, `cut_video()` and `add_video()`, returning an `EditResult`.
+- PDF pages are copied as objects, so nothing is rasterised. Video is
+  re-encoded at visually lossless quality so cuts are frame-accurate and clips
+  of different sizes, frame rates and audio layouts can be joined; a clip with
+  no audio contributes silence to keep sound in sync. `cut_video --copy` cuts
+  without re-encoding when speed matters more than a frame-exact start.
+- Every range is validated before anything is written, and every result is
+  built in a temporary file and checked with pikepdf or ffprobe before it is
+  moved into place, so a mistake never leaves a partial file behind.
+- `CommandSyntaxError`, raised with a message naming the offending text and
+  the expected form.
+
+### Notes
+
+- The commands take the whole expression in quotes: `(`, `[` and `>` are
+  special to every shell. Windows PowerShell 5.1 strips embedded double quotes
+  from arguments, so unquoted paths inside the expression are accepted too.
+- Probing now reads a video's display rotation, so portrait phone footage keeps
+  its orientation when joined with other clips.
+
 ## [2.4.0] - 2026-08-18
 
 ### Added

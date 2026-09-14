@@ -369,6 +369,79 @@ Both constants are heuristics tuned to established practice, not measurements
 of your specific clip — very high-motion footage or a slideshow will not match
 them exactly.
 
+## Cut and combine PDFs and videos
+
+Four more commands share one small grammar:
+
+```text
+<operation> <label>("<path>")[<range>] ... -> output("<folder>")
+```
+
+```bash
+add_pdf   'pdf1("D:/a.pdf")[2-9] pdf2("D:/b.pdf")[7-16] -> output("D:/out")'
+cut_pdf   'pdf("C:/My Documents/book.pdf")[2-5,8-12,20]'
+add_video 'video1("a.mp4")[00:00-00:30] video2("b.mp4")[01:10-02:00] -> output("D:/out")'
+cut_video 'video("movie.mp4")[00:02:10-00:05:30]'
+```
+
+| Operation   | Does                                        | Output name          |
+| ----------- | ------------------------------------------- | -------------------- |
+| `add_pdf`   | pages from two or more PDFs, in order       | `a_merged.pdf`       |
+| `cut_pdf`   | pages from one PDF                          | `book_pages_7-16.pdf`|
+| `add_video` | time ranges from two or more videos, joined | `a_joined.mp4`       |
+| `cut_video` | time ranges from one video                  | `movie_cut.mp4`      |
+
+**Quote the whole command.** `(`, `[` and `>` are special characters in bash,
+PowerShell and cmd — unquoted, `->` would redirect output into a file. Single
+quotes work everywhere. Paths inside may be quoted or not; the commands also
+cope with Windows PowerShell 5.1, which strips the inner quotes.
+
+**Ranges**
+
+- Pages start at 1: `7`, `2-9`, `7-end`, `2-5,8-12,20`, `16-7` (reversed),
+  `all`. A page may appear more than once. `add_pdf` takes whole files when
+  the `[...]` is left out.
+- Times: `130` (seconds), `02:10`, `00:02:10`, `1:02:03.5`. Ranges are
+  `start-end` or `01:20-end`; several may be joined with commas.
+
+**Output.** Without `output(...)` the result goes next to the first input. A
+folder is created if needed; a path ending in `.pdf` / `.mp4` / `.mkv` /
+`.mov` / `.webm` / `.avi` names the file exactly (`--overwrite` to replace
+one). Existing files are never replaced otherwise, and an input never is.
+
+**What happens to quality**
+
+- PDF pages are copied as PDF objects — nothing is rasterised or re-encoded.
+- Video is re-encoded (H.264 at CRF 18, visually lossless) so cuts are
+  frame-accurate and clips of different sizes, frame rates or audio can be
+  joined. Clips are fitted inside the first clip's frame without stretching;
+  a clip with no sound contributes silence so audio stays in sync. A progress
+  bar shows the time left.
+- `cut_video --copy` skips the re-encode: instant and lossless, but the cut
+  snaps to a keyframe and may start a moment early. One range only.
+
+Every result is written to a temporary file, re-opened and checked (page count
+with pikepdf, duration and streams with ffprobe), and only then moved into
+place. Every range is checked before anything is written, so a typo produces
+an error, not a half-finished file.
+
+From Python:
+
+```python
+from ecompress import add_pdf, add_video, cut_pdf, cut_video, execute
+
+execute('cut_pdf pdf("book.pdf")[7-16] -> output("D:/out")')
+
+cut_pdf("book.pdf", "2-5,8-12,20")
+add_pdf([("a.pdf", "2-9"), ("b.pdf", "7-16")], output="D:/out")
+cut_video("movie.mp4", "00:02:10-00:05:30")
+add_video([("a.mp4", (0, 30)), ("b.mp4", "01:10-02:00")])
+```
+
+Each returns an `EditResult` with `output_path`, `output_size_bytes`, `pages`
+or `duration_seconds`, and `elapsed_seconds`. Mistakes raise
+`CommandSyntaxError` with a message saying what was expected.
+
 ## Python API
 
 ```python

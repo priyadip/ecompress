@@ -17,7 +17,9 @@ Python usage::
 from __future__ import annotations
 
 from ecompress.api import compress
+from ecompress.edit import EditResult, add_pdf, add_video, cut_pdf, cut_video, execute
 from ecompress.errors import (
+    CommandSyntaxError,
     CompressError,
     InputFileError,
     InvalidTargetError,
@@ -31,14 +33,16 @@ from ecompress.reporting import ConsoleReporter, NullReporter, Reporter
 from ecompress.result import Attempt, CompressionResult, MediaType
 from ecompress.units import BYTES_PER_MB, bytes_to_mb, format_size, mb_to_bytes
 
-__version__ = "2.4.0"
+__version__ = "2.5.0"
 
 __all__ = [
     "BYTES_PER_MB",
     "Attempt",
+    "CommandSyntaxError",
     "CompressError",
     "CompressionResult",
     "ConsoleReporter",
+    "EditResult",
     "InputFileError",
     "InvalidTargetError",
     "MediaType",
@@ -50,8 +54,13 @@ __all__ = [
     "ToolExecutionError",
     "UnsupportedFormatError",
     "__version__",
+    "add_pdf",
+    "add_video",
     "bytes_to_mb",
     "compress",
+    "cut_pdf",
+    "cut_video",
+    "execute",
     "format_size",
     "mb_to_bytes",
 ]
